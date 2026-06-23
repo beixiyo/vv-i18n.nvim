@@ -1,7 +1,5 @@
 -- vv-i18n.resolver：三布局调用点解析 + make_namespace + 端到端
-vim.opt.runtimepath:prepend('/home/dev/.config/nvim/vendors/vv-i18n.nvim')
-vim.opt.runtimepath:prepend('/home/dev/.config/nvim/vendors/vv-utils.nvim')
-vim.opt.runtimepath:append('/home/dev/.local/share/nvim/site')
+dofile((debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')) .. '/bootstrap.lua')   -- 自定位 rtp
 
 local SPEC_DIR = debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')
 local H = dofile(SPEC_DIR .. '/helper.lua')
