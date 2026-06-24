@@ -115,6 +115,7 @@ function M.render(plugin, config, bufnr)
 end
 
 local function ft_match(bufnr, ft_list)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return false end
   local ft = vim.bo[bufnr].filetype
   for _, f in ipairs(ft_list) do if f == ft then return true end end
   return false
