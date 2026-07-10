@@ -7,7 +7,7 @@
 -- 内核全 tree-sitter：ast / reader / index / writer / resolver / display / editor / panel
 -- 依赖：Neovim >= 0.13、tree-sitter typescript/tsx、vv-utils。布局与配置见 README
 --
--- 用户命令：VVI18nKeys / Edit / Info / Jump / SetValue / AddKey / Reload / 预览开关
+-- 用户命令：VVI18nKeys / Missing / Edit / Info / Jump / SetValue / AddKey / Reload / 预览开关
 local ast = require('vv-i18n.ast')
 local resolver = require('vv-i18n.resolver')
 local Index = require('vv-i18n.index')
@@ -413,21 +413,9 @@ end
 local function cmd_info()
   local res = M.resolve_cursor()
   if not res.ok then return notify('光标处无 i18n 键：' .. (res.reason or '?'), vim.log.levels.WARN) end
-  local per = M.lookup(res.full_key)
-  local lines = { '键: ' .. res.full_key }
-  if res.reason == 'no-binding' then lines[#lines + 1] = '(未找到翻译 hook 绑定，按字面量解析)' end
-  if not per then
-    lines[#lines + 1] = '⚠ 索引中未找到该键'
-  else
-    local langs = {}
-    for l in pairs(per) do langs[#langs + 1] = l end
-    table.sort(langs)
-    for _, l in ipairs(langs) do
-      local e = per[l]
-      lines[#lines + 1] = ('  %-6s %s'):format(l, e.kind == 'string' and e.value or ('<' .. e.kind .. '>'))
-    end
-  end
-  notify(table.concat(lines, '\n'))
+  require('vv-i18n.info').open(M, res.full_key, {
+    note = res.reason == 'no-binding' and '未找到翻译 hook 绑定，按字面量解析' or nil,
+  })
 end
 
 local function cmd_jump()
@@ -489,6 +477,10 @@ function M.open_panel()
   require('vv-i18n.panel').toggle(M)
 end
 
+function M.open_missing_panel()
+  require('vv-i18n.panel').open(M, { only_missing = true, group_by = 'missing_lang' })
+end
+
 function M.edit_cursor()
   local res = M.resolve_cursor()
   if not res.ok then return notify('光标处无 i18n 键：' .. (res.reason or '?'), vim.log.levels.WARN) end
@@ -529,6 +521,7 @@ function M.setup(opts)
 
   local cmd = vim.api.nvim_create_user_command
   cmd('VVI18nKeys',     function() M.open_panel() end, { desc = 'vv-i18n: 键浏览/同步编辑面板' })
+  cmd('VVI18nMissing',  function() M.open_missing_panel() end, { desc = 'vv-i18n: 缺失 key 检测面板' })
   cmd('VVI18nEdit',     function() M.edit_cursor() end, { desc = 'vv-i18n: 多语言同步编辑' })
   cmd('VVI18nInfo',     cmd_info, { desc = 'vv-i18n: 光标处键各语言译文' })
   cmd('VVI18nJump',     cmd_jump, { desc = 'vv-i18n: 跳到 locale 定义' })

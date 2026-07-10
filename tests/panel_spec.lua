@@ -46,11 +46,66 @@ check('真实 fixture 未被改动（全程 dry-run）', H.read(HERO_ZH) == orig
 -- panel：真开窗读 buffer
 panel.open(i18n)
 local pbuf = vim.api.nvim_get_current_buf()
-local joined = table.concat(vim.api.nvim_buf_get_lines(pbuf, 0, -1, false), '\n')
+local function panel_lines()
+  return vim.api.nvim_buf_get_lines(pbuf, 0, -1, false)
+end
+
+local function joined_panel()
+  return table.concat(panel_lines(), '\n')
+end
+
+local function find_line(needle)
+  for i, line in ipairs(panel_lines()) do
+    if line:find(needle, 1, true) then return i end
+  end
+end
+
+local function run_map(lhs)
+  for _, m in ipairs(vim.api.nvim_buf_get_keymap(pbuf, 'n')) do
+    if m.lhs == lhs and m.callback then
+      m.callback()
+      return true
+    end
+  end
+  return false
+end
+
+local joined = joined_panel()
 check('panel 含 hero 组', joined:find('hero', 1, true) ~= nil)
 check('panel 含 title 键', joined:find('title', 1, true) ~= nil)
 check('panel 含译文(Hero/英雄)', joined:find('Hero', 1, true) ~= nil or joined:find('英雄', 1, true) ~= nil)
 check('panel 标题含 i18n keys', joined:find('i18n keys', 1, true) ~= nil)
+
+local title_lnum = find_line('title')
+check('panel 找到 title 行', title_lnum ~= nil)
+if title_lnum then
+  vim.api.nvim_win_set_cursor(0, { title_lnum, 0 })
+  check('panel h 映射存在', run_map('h'))
+  local closed = joined_panel()
+  local fold_closed = require('vv-icons').raw.ui.fold_closed.glyph
+  check('panel h 可从 key 行收起父组', closed:find('title', 1, true) == nil)
+  check('panel 折叠图标同 vv-explorer', closed:find(fold_closed, 1, true) ~= nil)
+
+  local hero_lnum = find_line('hero')
+  check('panel 找到 hero 组行', hero_lnum ~= nil)
+  if hero_lnum then
+    vim.api.nvim_win_set_cursor(0, { hero_lnum, 0 })
+    check('panel l 映射存在', run_map('l'))
+    check('panel l 可展开组', joined_panel():find('title', 1, true) ~= nil)
+  end
+end
+
+check('panel g? 映射存在', run_map('g?'))
+local help_buf = vim.api.nvim_get_current_buf()
+local help_text = table.concat(vim.api.nvim_buf_get_lines(help_buf, 0, -1, false), '\n')
+check('panel g? 打开帮助面板', vim.bo[help_buf].filetype == 'vv-i18n-help')
+check('help 含 group by missing lang', help_text:find('group by missing lang', 1, true) ~= nil)
+pcall(vim.api.nvim_win_close, 0, true)
+
+panel.open(i18n, { only_missing = true, group_by = 'missing_lang' })
+local missing = joined_panel()
+check('panel 缺失组含 ja-JP', missing:find('ja-JP', 1, true) ~= nil)
+check('panel 缺失组含 common.cancel', missing:find('common.cancel', 1, true) ~= nil)
 panel.close()
 
 done()

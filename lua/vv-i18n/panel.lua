@@ -9,13 +9,19 @@ local M = {}
 
 local ns = vim.api.nvim_create_namespace('vv_i18n_panel')
 
----@type { buf: integer?, win: integer?, prev_win: integer?, plugin: table?, tree: table[]?, only_missing: boolean }
-local state = { only_missing = false }
+---@type { buf: integer?, win: integer?, prev_win: integer?, plugin: table?, source_tree: table[]?, tree: table[]?, only_missing: boolean, group_by: 'mount'|'missing_lang' }
+local state = { only_missing = false, group_by = 'mount' }
 
 -- 行 → 数据：{ kind='group'|'key', group_idx, key? }
 local line_map = {}
 
-local CHEV_OPEN, CHEV_CLOSED = '▾', '▸'
+local function ui_icon(key, fallback)
+  local ok, icons = pcall(require, 'vv-icons')
+  local entry = ok and icons.raw and icons.raw.ui and icons.raw.ui[key]
+  return (entry and entry.glyph) or fallback
+end
+
+local CHEV_OPEN, CHEV_CLOSED = ui_icon('fold_open', '▾'), ui_icon('fold_closed', '▸')
 
 hl.register('vv-i18n.panel.hl', {
   VVI18nPanelTitle   = { link = 'Title' },
@@ -34,17 +40,72 @@ hl.register('vv-i18n.panel.hl', {
 -- 该键完整度徽标：组内每语言一个 ✓/·
 local function badge(group, key)
   local cells = {}
-  for _, l in ipairs(group.langs) do
+  for _, l in ipairs(key.langs or group.langs or {}) do
     cells[#cells + 1] = { (key.per[l] and '✓' or '·'), key.per[l] and 'VVI18nPanelOk' or 'VVI18nPanelMiss' }
   end
   return cells
 end
 
 local function visible_keys(group)
-  if not state.only_missing then return group.keys end
+  if state.group_by == 'missing_lang' or not state.only_missing then return group.keys end
   local out = {}
   for _, k in ipairs(group.keys) do if #k.missing > 0 then out[#out + 1] = k end end
   return out
+end
+
+local function missing_total(tree)
+  local seen, total = {}, 0
+  for _, g in ipairs(tree) do
+    for _, k in ipairs(g.keys) do
+      if #k.missing > 0 and not seen[k.full] then
+        seen[k.full] = true
+        total = total + 1
+      end
+    end
+  end
+  return total
+end
+
+local function build_missing_lang_tree(tree)
+  local by_lang = {}
+  for _, g in ipairs(tree or {}) do
+    for _, k in ipairs(g.keys or {}) do
+      for _, lang in ipairs(k.missing or {}) do
+        local group = by_lang[lang]
+        if not group then
+          group = { mount = lang, langs = {}, keys = {}, missing_lang = lang }
+          by_lang[lang] = group
+        end
+
+        local rel = k.rel
+        if g.mount and g.mount ~= '(flat)' and not vim.startswith(rel, g.mount .. '.') then
+          rel = g.mount .. '.' .. rel
+        end
+
+        group.keys[#group.keys + 1] = {
+          full = k.full,
+          rel = rel,
+          per = k.per,
+          missing = k.missing,
+          langs = g.langs,
+          source_mount = g.mount,
+        }
+      end
+    end
+  end
+
+  local out = {}
+  for _, g in pairs(by_lang) do
+    table.sort(g.keys, function(a, b) return a.full < b.full end)
+    out[#out + 1] = g
+  end
+  table.sort(out, function(a, b) return a.mount < b.mount end)
+  return out
+end
+
+local function make_tree()
+  if state.group_by == 'missing_lang' then return build_missing_lang_tree(state.source_tree) end
+  return state.source_tree or {}
 end
 
 local function render()
@@ -65,8 +126,10 @@ local function render()
   local title = '  󰗊  i18n keys'
   lines[#lines + 1] = title
   mark(0, 0, #title, 'VVI18nPanelTitle')
-  local meta = string.format('  %d keys · %d groups · %d missing%s',
-    total, #tree, missing_total, state.only_missing and ' · [missing]' or '')
+  local mode = state.group_by == 'missing_lang' and ' · by missing lang' or ''
+  local filter = state.only_missing and ' · missing only' or ''
+  local meta = string.format('  %d keys · %d groups · %d missing%s%s',
+    total, #tree, missing_total, mode, filter)
   marks[#marks + 1] = { 0, #title, { virt_text = { { meta, 'VVI18nPanelCount' } }, virt_text_pos = 'eol' } }
 
   local sep = string.rep('─', 40)
@@ -119,7 +182,7 @@ local function render()
   end
 
   lines[#lines + 1] = ''
-  local footer = '  j/k 移动 · <CR> 编辑/折叠 · m 仅缺失 · r 重载 · q 关闭'
+  local footer = '  j/k 移动 · h/l 折叠 · <CR> 编辑 · m 仅缺失 · g 分组 · g? 帮助 · q 关闭'
   lines[#lines + 1] = footer
   mark(#lines - 1, 0, #footer, 'VVI18nPanelFooter')
 
@@ -134,7 +197,8 @@ local function render()
 end
 
 local function rebuild()
-  state.tree = state.plugin and state.plugin.tree() or {}
+  state.source_tree = state.plugin and state.plugin.tree() or {}
+  state.tree = make_tree()
   render()
 end
 
@@ -178,8 +242,47 @@ local function on_enter()
   end
 end
 
+local function move_to_group(group_idx)
+  if not (state.win and vim.api.nvim_win_is_valid(state.win)) then return end
+  for lnum, info in pairs(line_map) do
+    if info.kind == 'group' and info.group_idx == group_idx then
+      pcall(vim.api.nvim_win_set_cursor, state.win, { lnum, 0 })
+      return
+    end
+  end
+end
+
+local function set_group_open(open)
+  local info = line_map[vim.fn.line('.')]
+  if not info then return end
+  local g = state.tree and state.tree[info.group_idx]
+  if not g then return end
+  if g.open ~= open then
+    g.open = open
+    render()
+  end
+  move_to_group(info.group_idx)
+end
+
+local function open_or_edit()
+  local info = line_map[vim.fn.line('.')]
+  if not info then return end
+  if info.kind == 'group' then
+    set_group_open(true)
+  else
+    on_enter()
+  end
+end
+
 local function toggle_missing()
   state.only_missing = not state.only_missing
+  state.tree = make_tree()
+  render()
+end
+
+local function toggle_group_by()
+  state.group_by = state.group_by == 'missing_lang' and 'mount' or 'missing_lang'
+  state.tree = make_tree()
   render()
 end
 
@@ -194,12 +297,18 @@ local function create_buf()
   local map = function(lhs, fn, action)
     vim.keymap.set('n', lhs, fn, { buffer = buf, silent = true, nowait = true, desc = 'vv-i18n: ' .. action })
   end
-  map('<CR>', on_enter, 'edit / toggle group')
+  map('<CR>', on_enter, 'edit_or_toggle')
+  map('l', open_or_edit, 'open_or_edit')
+  map('h', function() set_group_open(false) end, 'close_group')
+  map('<Right>', open_or_edit, 'open_or_edit')
+  map('<Left>', function() set_group_open(false) end, 'close_group')
   map('j', function() navigate('j') end, 'next')
   map('k', function() navigate('k') end, 'prev')
   map('<Down>', function() navigate('j') end, 'next')
   map('<Up>', function() navigate('k') end, 'prev')
-  map('m', toggle_missing, 'only missing')
+  map('m', toggle_missing, 'only_missing')
+  map('g', toggle_group_by, 'group_by_missing_lang')
+  map('g?', function() require('vv-i18n.help').open(state) end, 'help')
   map('r', function() state.plugin.reload(); rebuild() end, 'reload')
   map('q', function() M.close() end, 'close')
   map('<Esc>', function() M.close() end, 'close')
@@ -215,15 +324,23 @@ local function cleanup()
   line_map = {}
   state.buf = nil
   state.win = nil
+  state.source_tree = nil
   state.tree = nil
 end
 
-function M.open(plugin)
+function M.open(plugin, opts)
+  opts = opts or {}
   if state.win and vim.api.nvim_win_is_valid(state.win) then
+    state.plugin = plugin
+    if opts.only_missing ~= nil then state.only_missing = opts.only_missing end
+    if opts.group_by then state.group_by = opts.group_by end
+    rebuild()
     vim.api.nvim_set_current_win(state.win)
     return
   end
   state.plugin = plugin
+  if opts.only_missing ~= nil then state.only_missing = opts.only_missing end
+  if opts.group_by then state.group_by = opts.group_by end
   state.prev_win = vim.api.nvim_get_current_win()
   state.buf = create_buf()
 
@@ -254,8 +371,12 @@ function M.close()
   end
 end
 
-function M.toggle(plugin)
-  if state.win and vim.api.nvim_win_is_valid(state.win) then M.close() else M.open(plugin) end
+function M.toggle(plugin, opts)
+  if state.win and vim.api.nvim_win_is_valid(state.win) and not opts then M.close() else M.open(plugin, opts) end
+end
+
+function M.missing_count(plugin)
+  return missing_total(plugin and plugin.tree() or {})
 end
 
 return M

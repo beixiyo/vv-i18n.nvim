@@ -8,4 +8,5 @@ local vendors = root:match('(.*)/[^/]*$')                               -- å¹¶åˆ
 
 vim.opt.runtimepath:prepend(root)
 vim.opt.runtimepath:prepend(vim.env.VV_UTILS or (vendors .. '/vv-utils.nvim'))
+vim.opt.runtimepath:prepend(vim.env.VV_ICONS or (vendors .. '/vv-icons.nvim'))
 vim.opt.runtimepath:append(vim.fn.stdpath('data') .. '/site')

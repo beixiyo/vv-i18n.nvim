@@ -13,6 +13,7 @@ local check, done = H.checker()
 --------------------------------------------------------------------------------
 i18n.setup(H.ns_config())
 check('命令 VVI18nKeys 注册', vim.fn.exists(':VVI18nKeys') == 2)
+check('命令 VVI18nMissing 注册', vim.fn.exists(':VVI18nMissing') == 2)
 check('命令 VVI18nEdit 注册', vim.fn.exists(':VVI18nEdit') == 2)
 
 i18n.reload()
@@ -34,6 +35,23 @@ check('compute 有预览项', #items > 0, #items)
 local hit
 for _, it in ipairs(items) do if it.full_key == 'app.hero.title' then hit = it end end
 check('compute 命中 app.hero.title', hit ~= nil and not hit.missing)
+
+vim.api.nvim_set_current_buf(buf)
+local src_lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+for i, line in ipairs(src_lines) do
+  local col = line:find('hero.title', 1, true)
+  if col then
+    vim.api.nvim_win_set_cursor(0, { i, col - 1 })
+    break
+  end
+end
+vim.cmd('VVI18nInfo')
+local info_buf = vim.api.nvim_get_current_buf()
+local info_text = table.concat(vim.api.nvim_buf_get_lines(info_buf, 0, -1, false), '\n')
+check('VVI18nInfo 打开窗口', vim.bo[info_buf].filetype == 'vv-i18n-info')
+check('VVI18nInfo 含当前 key', info_text:find('app.hero.title', 1, true) ~= nil)
+check('VVI18nInfo 含译文', info_text:find('Hero', 1, true) ~= nil and info_text:find('英雄', 1, true) ~= nil)
+pcall(vim.api.nvim_win_close, 0, true)
 
 -- S6 preferred_langs
 check('默认 preferred_lang = 字典序首个 en-US', i18n.preferred_lang({ 'zh-CN', 'en-US' }) == 'en-US')
