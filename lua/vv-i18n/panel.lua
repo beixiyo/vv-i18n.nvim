@@ -3,7 +3,8 @@
 -- 按挂载点（hero/common/…）分组列出所有键，每行示主语言译文 + 各语言完整度
 -- 勾叉徽标；<CR> 打开多语言同步编辑浮窗（editor.lua）。窗口骨架照 vv-flow/panel
 local hl = require('vv-utils.hl')
-local truncate = require('vv-i18n.util').truncate
+local util = require('vv-i18n.util')
+local truncate = util.truncate
 
 local M = {}
 
@@ -88,6 +89,7 @@ local function build_missing_lang_tree(tree)
           per = k.per,
           missing = k.missing,
           langs = g.langs,
+          target_lang = lang,
           source_mount = g.mount,
         }
       end
@@ -161,7 +163,7 @@ local function render()
           local plang = state.plugin.preferred_lang(g.langs)
           for _, k in ipairs(vis) do
             local pe = k.per[plang]
-            local val = pe and (pe.kind == 'string' and pe.value or ('<' .. pe.kind .. '>')) or ''
+            local val = util.entry_value(pe) or ''
             local rel = truncate(k.rel, 28)
             local line = string.format('   %-28s %s', rel, truncate(val, 30))
             lines[#lines + 1] = line
@@ -182,7 +184,7 @@ local function render()
   end
 
   lines[#lines + 1] = ''
-  local footer = '  j/k 移动 · h/l 折叠 · <CR> 编辑 · m 仅缺失 · g 分组 · g? 帮助 · q 关闭'
+  local footer = '  j/k 移动 · h/l 折叠 · e/<CR> 编辑 · m 仅缺失 · g 分组 · g? 帮助 · q 关闭'
   lines[#lines + 1] = footer
   mark(#lines - 1, 0, #footer, 'VVI18nPanelFooter')
 
@@ -207,6 +209,17 @@ local function selectable_lines()
   for lnum in pairs(line_map) do ls[#ls + 1] = lnum end
   table.sort(ls)
   return ls
+end
+
+local function focus_first_key()
+  if not (state.win and vim.api.nvim_win_is_valid(state.win)) then return end
+  local ls = selectable_lines()
+  for _, l in ipairs(ls) do
+    if (line_map[l] or {}).kind == 'key' then
+      pcall(vim.api.nvim_win_set_cursor, state.win, { l, 0 })
+      return
+    end
+  end
 end
 
 local function navigate(dir)
@@ -234,6 +247,7 @@ local function on_enter()
     render()
   elseif info.kind == 'key' then
     require('vv-i18n.editor').open(state.plugin, info.key.full, {
+      focus_lang = info.key.target_lang,
       on_saved = function()
         state.plugin.reload()
         rebuild()
@@ -274,6 +288,11 @@ local function open_or_edit()
   end
 end
 
+local function edit_current()
+  local info = line_map[vim.fn.line('.')]
+  if info and info.kind == 'key' then on_enter() end
+end
+
 local function toggle_missing()
   state.only_missing = not state.only_missing
   state.tree = make_tree()
@@ -298,6 +317,7 @@ local function create_buf()
     vim.keymap.set('n', lhs, fn, { buffer = buf, silent = true, nowait = true, desc = 'vv-i18n: ' .. action })
   end
   map('<CR>', on_enter, 'edit_or_toggle')
+  map('e', edit_current, 'edit')
   map('l', open_or_edit, 'open_or_edit')
   map('h', function() set_group_open(false) end, 'close_group')
   map('<Right>', open_or_edit, 'open_or_edit')
@@ -336,6 +356,7 @@ function M.open(plugin, opts)
     if opts.group_by then state.group_by = opts.group_by end
     rebuild()
     vim.api.nvim_set_current_win(state.win)
+    focus_first_key()
     return
   end
   state.plugin = plugin
@@ -354,13 +375,7 @@ function M.open(plugin, opts)
   vim.api.nvim_create_autocmd('BufWipeout', { buffer = state.buf, once = true, callback = cleanup })
 
   rebuild()
-  -- 光标落到首个键行
-  local ls = selectable_lines()
-  for _, l in ipairs(ls) do
-    if (line_map[l] or {}).kind == 'key' then
-      pcall(vim.api.nvim_win_set_cursor, state.win, { l, 0 }); break
-    end
-  end
+  focus_first_key()
 end
 
 function M.close()

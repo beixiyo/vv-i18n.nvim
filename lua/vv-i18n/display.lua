@@ -6,7 +6,8 @@
 -- 渲染内容可由 display.render(ctx) 函数完全自定义（返回字符串 或 virt_text chunks）
 -- 光标落在某 t() 上 → 删该项 extmark 还原原文（token 级，同行其它仍显译文）
 -- 依赖 conceal：enable 给匹配窗口设 conceallevel=2 / concealcursor='nvic'，disable 还原
-local truncate = require('vv-i18n.util').truncate
+local util = require('vv-i18n.util')
+local truncate = util.truncate
 
 local M = {}
 
@@ -23,7 +24,7 @@ local function build_chunks(plugin, config, r)
   local hit = r.kind == 'hit'
   local lang = hit and plugin.pick_lang(r.per) or nil
   local entry = hit and r.per[lang] or nil
-  local value = entry and (entry.kind == 'string' and entry.value or ('<' .. entry.kind .. '>')) or nil
+  local value = util.entry_value(entry)
   local hl = hit and d.hl or d.missing_hl
 
   if type(d.render) == 'function' then

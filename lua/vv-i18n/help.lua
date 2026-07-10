@@ -6,6 +6,7 @@ local M = {}
 
 local ACTIONS = {
   edit_or_toggle        = { cat = 'Navigate', icon = '' },
+  edit                  = { cat = 'Navigate', icon = '' },
   open_or_edit          = { cat = 'Navigate', icon = '' },
   close_group           = { cat = 'Navigate', icon = '' },
   next                  = { cat = 'Navigate', icon = '' },

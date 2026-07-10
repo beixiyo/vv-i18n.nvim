@@ -18,4 +18,25 @@ function M.truncate(s, max)
   return table.concat(out) .. '…'
 end
 
+--- 取适合单行预览的译文；复数优先 other，其次首个字符串形态
+---@param entry table?
+---@return string?
+function M.entry_value(entry)
+  if not entry then return nil end
+  if entry.kind == 'string' then return entry.value end
+
+  if entry.kind == 'plural' then
+    local first
+    for _, variant in ipairs(entry.variants or {}) do
+      if variant.kind == 'string' then
+        if variant.form == 'other' then return variant.value end
+        first = first or variant.value
+      end
+    end
+    return first or '<plural>'
+  end
+
+  return '<' .. (entry.kind or 'other') .. '>'
+end
+
 return M

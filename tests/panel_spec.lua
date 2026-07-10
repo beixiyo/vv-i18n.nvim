@@ -23,6 +23,21 @@ if rows then
   check('plan 行2=zh-CN 值=英雄', rows[2].lang == 'zh-CN' and lines[2] == '英雄', lines[2])
 end
 
+-- 复数对象与标量同 key：不走 add，展开形态后逐项 update
+local prows, plines = editor.plan(i18n, 'app.hero.items')
+check('plan 复数对象展开为 3 行', prows and #prows == 3, prows and #prows)
+if prows then
+  check('plan 含 en-US.one', prows[1].label == 'en-US.one' and plines[1] == '{{count}} item')
+  check('plan 含 en-US.other', prows[2].label == 'en-US.other' and plines[2] == '{{count}} items')
+  check('plan 含 zh-CN 标量', prows[3].lang == 'zh-CN' and plines[3] == '共 {{count}} 项')
+
+  local writes = editor.diff(prows, { '{{count}} item!', plines[2], plines[3] })
+  check('复数形态编辑走 update', #writes == 1 and writes[1].action == 'update'
+    and table.concat(writes[1].in_file_path, '.') == 'hero.items.one')
+  local changed, fails = editor.apply(writes, { dry_run = true })
+  check('复数形态 dry-run 可写回', changed == 1 and #fails == 0, table.concat(fails, ','))
+end
+
 -- editor.diff：改 zh-CN → 1 处 update
 if rows then
   local writes = editor.diff(rows, { lines[1], '英雄★' })
@@ -106,6 +121,25 @@ panel.open(i18n, { only_missing = true, group_by = 'missing_lang' })
 local missing = joined_panel()
 check('panel 缺失组含 ja-JP', missing:find('ja-JP', 1, true) ~= nil)
 check('panel 缺失组含 common.cancel', missing:find('common.cancel', 1, true) ~= nil)
+check('missing panel 光标落在缺失 key', (vim.api.nvim_get_current_line() or ''):find('common.cancel', 1, true) ~= nil)
+local missing_lnum = find_line('common.cancel')
+check('missing panel 找到 common.cancel 行', missing_lnum ~= nil)
+if missing_lnum then
+  vim.api.nvim_win_set_cursor(0, { missing_lnum, 0 })
+  check('missing panel e 打开编辑器', run_map('e'))
+  local edit_buf = vim.api.nvim_get_current_buf()
+  local edit_lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
+  local rows = editor.plan(i18n, 'app.common.cancel')
+  local ja_lnum
+  for i, row in ipairs(rows or {}) do
+    if row.lang == 'ja-JP' then ja_lnum = i end
+  end
+  check('缺失编辑器已打开', vim.bo[edit_buf].filetype == 'vv-i18n-editor')
+  check('编辑器聚焦 ja-JP 缺失行', ja_lnum and vim.api.nvim_win_get_cursor(0)[1] == ja_lnum)
+  check('ja-JP 缺失行是输入槽', ja_lnum and edit_lines[ja_lnum]:match('^%s+$') ~= nil)
+  check('编辑器光标在值列', vim.api.nvim_win_get_cursor(0)[2] > 0)
+  require('vv-i18n.editor')._close()
+end
 panel.close()
 
 done()

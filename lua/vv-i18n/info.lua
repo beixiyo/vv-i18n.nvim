@@ -3,6 +3,7 @@
 -- 替代 notify 长文本：译文进入可聚焦浮窗，方便滚动、复制，并可用 e/<CR> 跳到
 -- 既有多语言编辑器
 local hl = require('vv-utils.hl')
+local entry_value = require('vv-i18n.util').entry_value
 
 local M = {}
 
@@ -74,7 +75,7 @@ local function build_lines(plugin, full_key, per, note)
 
     for _, lang in ipairs(langs) do
       local entry = per[lang]
-      local value = entry.kind == 'string' and entry.value or ('<' .. entry.kind .. '>')
+      local value = entry_value(entry) or ''
       local prefix = '  ' .. lang .. string.rep(' ', width - vim.fn.strdisplaywidth(lang)) .. '  '
       local line = prefix .. value
       lines[#lines + 1] = line

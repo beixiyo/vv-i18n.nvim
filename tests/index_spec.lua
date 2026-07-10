@@ -20,6 +20,12 @@ local fA = A:resolve_files_for_key('app.hero.title')
 check('A resolve 2 文件', fA and #fA == 2, fA and #fA)
 check('A in_file_path=hero.title（含顶层 key）', fA and table.concat(fA[1].in_file_path, '.') == 'hero.title')
 check('A card.tags 是 array', (A:get('app.card.tags') or {})['zh-CN'] and A:get('app.card.tags')['zh-CN'].kind == 'array')
+local plural = A:get('app.hero.items') or {}
+check('A 复数父 key 命中两语言', plural['en-US'] ~= nil and plural['zh-CN'] ~= nil)
+check('A en-US 识别为 plural', plural['en-US'] and plural['en-US'].kind == 'plural')
+check('A plural 保留 one/other 形态', plural['en-US'] and #(plural['en-US'].variants or {}) == 2)
+check('A 复数父 key 不误报缺失', #A:missing('app.hero.items') == 0)
+check('A 复数形态不当作跨语言 key', A:get('app.hero.items.one') == nil)
 check('A common.cancel 缺 ja-JP', #A:missing('app.common.cancel') == 1 and A:missing('app.common.cancel')[1] == 'ja-JP')
 check('A common.ok 不缺', #A:missing('app.common.ok') == 0)
 -- tree

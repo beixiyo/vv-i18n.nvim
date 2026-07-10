@@ -225,7 +225,12 @@ function M.build(opts)
     local pok, res = pcall(custom_parse, content, path)
     if not pok then return { ok = false, reason = 'parse-error:' .. tostring(res) } end
     if type(res) ~= 'table' or type(res.leaves) ~= 'table' then return { ok = false, reason = 'parse-bad-shape' } end
-    return { ok = true, top_keys = res.top_keys or {}, leaves = res.leaves }
+    return {
+      ok = true,
+      top_keys = res.top_keys or {},
+      leaves = res.leaves,
+      objects = res.objects or {},
+    }
   end
 
   local self = setmetatable({
@@ -239,6 +244,7 @@ function M.build(opts)
 
   local errors = {}
   local lang_set = {}
+  local object_entries = {}
 
   local function join(...)
     local parts = {}
@@ -255,6 +261,25 @@ function M.build(opts)
       m.files[lang] = path
       m.langs[#m.langs + 1] = lang
     end
+  end
+
+  local function full_key_for(entry, ns)
+    if mount_kind == 'top-key' or mount_kind == 'flat' then
+      return join(prefix, entry.dotted)
+    end
+    return join(prefix, ns, entry.dotted)
+  end
+
+  local function indexed_entry(entry, file)
+    return {
+      file = file,
+      in_file_path = entry.path,
+      kind = entry.kind,
+      value = entry.value,
+      variants = entry.variants,
+      row = entry.row,
+      col = entry.col,
+    }
   end
 
   for _, dir in ipairs(opts.dirs or {}) do
@@ -280,25 +305,28 @@ function M.build(opts)
           end
 
           for _, leaf in ipairs(res.leaves) do
-            local full
-            if mount_kind == 'top-key' or mount_kind == 'flat' then
-              full = join(prefix, leaf.dotted)
-            else
-              full = join(prefix, ns, leaf.dotted)
-            end
+            local full = full_key_for(leaf, ns)
             local per = self.keys[full]
             if not per then per = {}; self.keys[full] = per end
-            per[lang] = {
-              file = f.path,
-              in_file_path = leaf.path,
-              kind = leaf.kind,
-              value = leaf.value,
-              row = leaf.row,
-              col = leaf.col,
-            }
+            per[lang] = indexed_entry(leaf, f.path)
+          end
+
+          -- 普通对象本身不进入 key 列表；只有同路径在其它语言是翻译值时，才用于补齐
+          -- per，表示该语言并非缺失，而是该路径已被对象占用
+          for _, object in ipairs(res.objects or {}) do
+            local full = full_key_for(object, ns)
+            local per = object_entries[full]
+            if not per then per = {}; object_entries[full] = per end
+            per[lang] = indexed_entry(object, f.path)
           end
         end
       end
+    end
+  end
+
+  for full, per in pairs(self.keys) do
+    for lang, entry in pairs(object_entries[full] or {}) do
+      if per[lang] == nil then per[lang] = entry end
     end
   end
 
