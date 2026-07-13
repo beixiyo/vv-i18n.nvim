@@ -184,7 +184,7 @@ local function render()
   end
 
   lines[#lines + 1] = ''
-  local footer = '  j/k 移动 · h/l 折叠 · e/<CR> 编辑 · m 仅缺失 · g 分组 · g? 帮助 · q 关闭'
+  local footer = '  j/k Move · h/l Fold · e/<CR> Edit · m Miss · g Group · g? Help · q Close'
   lines[#lines + 1] = footer
   mark(#lines - 1, 0, #footer, 'VVI18nPanelFooter')
 

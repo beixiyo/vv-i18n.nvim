@@ -1,20 +1,26 @@
-# vv-i18n.nvim
+<div align="center">
+  <h1>vv-i18n.nvim</h1>
+  <p>English | <a href="./README.zh-CN.md">中文</a></p>
+  <img src="./docs/assets/vv-i18n.png" alt="vv-i18n demo" width="900" />
+  <p>Want my Neovim config? See <a href="https://github.com/beixiyo/dotfiles">dotfiles</a></p>
+  <p><strong>Inline previews, definition jumps, synchronized edits, and missing-locale completion for TS/TSX i18n</strong>, inspired by <em>lokalise</em> and <em>i18n-ally</em></p>
+  <p>
+    <img src="https://img.shields.io/badge/Neovim-0.10+-57A143?style=flat-square&logo=neovim&logoColor=white" alt="Requires Neovim 0.10+" />
+    <img src="https://img.shields.io/badge/Lua-2C2D72?style=flat-square&logo=lua&logoColor=white" alt="Lua" />
+  </p>
+</div>
 
-TS/TSX i18n 的**行内预览 / 跳转定义 / 同步改值 / 补缺失语言**，对标 _lokalise_ · _i18n-ally_
+vv-i18n targets projects that generic tools cannot model: locale data may be named exports from TS/JS modules or JSON, several files may be mounted below a namespace at runtime, and hooks may inject key prefixes. **Locale discovery, file-to-language mapping, file-to-namespace mapping, and call-site prefixes each accept either a literal strategy or a function.** Defaults are neutral, and the core parser uses treesitter throughout.
 
-面向通用工具够不着的项目：locale 是 TS/JS 模块具名导出（或 JSON），运行时把多个文件合并到
-命名空间根下、hook 注入前缀。**locale 来源 / 文件→语言 / 文件→命名空间 / 调用点→前缀
-均「字面量或函数」可配**，默认中性，内核全 tree-sitter
+## Identify your project layout
 
-## 先对号入座：你的项目是哪种布局？
+| Layout | Namespace location | Example | Fully qualified key | `mount` |
+|--------|--------------------|---------|---------------------|---------|
+| **top-key** | Top-level key inside the file | `Hero/zh-CN.ts` = `{ hero: { title } }` | `hero.title` | `'top-key'` |
+| **filename** | Filename or path | `en/common.json` = `{ ok }` | `common.ok` | `'filename'` |
+| **flat** | No namespace | `zh-CN.ts` = `{ greeting: { hello } }` | `greeting.hello` | `'flat'` |
 
-| 布局         | 命名空间在哪         | 例子                                    | 全键             | 配 `mount`   |
-| ------------ | -------------------- | --------------------------------------- | ---------------- | ------------ |
-| **top-key**  | 文件**内容**顶层 key | `Hero/zh-CN.ts` = `{ hero: { title } }` | `hero.title`     | `'top-key'`  |
-| **filename** | **文件名 / 路径**    | `en/common.json` = `{ ok }`             | `common.ok`      | `'filename'` |
-| **flat**     | 无                   | `zh-CN.ts` = `{ greeting: { hello } }`  | `greeting.hello` | `'flat'`     |
-
-## 安装（PackSpec / lazy.nvim）
+## Installation with PackSpec or lazy.nvim
 
 ```lua
 {
@@ -28,25 +34,25 @@ TS/TSX i18n 的**行内预览 / 跳转定义 / 同步改值 / 补缺失语言**�
 }
 ```
 
-> `sources` 默认为空 → 不激活；按你的布局配好才生效，非匹配项目零噪声
+> `sources` is empty by default, so the plugin remains inactive until a layout is configured and produces no noise in unrelated projects.
 
-## 按布局对照配置（找到你的文件树，抄对应那段）
+## Configuration by layout
 
-> locale 文件格式：**JS / TS 对象导出 + JSON**（`export const x = {...} (as const)` / `export default {...}` / `module.exports` / 裸 `{...}` / `.json`）。其它格式（YAML / PO 等）传 `parse` 自定义解析函数读入（见下「自定义解析」）
+Locale files may be **JS/TS object exports or JSON**: `export const x = {...} (as const)`, `export default {...}`, `module.exports`, a bare object, or `.json`. For YAML, PO, and other formats, provide a custom read-side `parse` function as described below.
 
-### top-key —— 命名空间在文件**内容**顶层 key
+### top-key: namespace stored in the file content
 
-```
+```text
 packages/ui/src/
   components/Hero/locales/
-    zh-CN.ts   = { hero: { title: '英雄' } }   → 全键  ui.hero.title
+    zh-CN.ts   = { hero: { title: 'Hero' } }   → ui.hero.title
     en-US.ts
-  i18n/common/{zh-CN,en-US}.ts                 → 全键  ui.common.*
+  i18n/common/{zh-CN,en-US}.ts                 → ui.common.*
 ```
 
 ```ts
-const t = useUiT()                            // hook 注入前缀 ui
-t('hero.title')   // Hero/locales/zh-CN.ts  { hero: { title } }  →  ui.hero.title
+const t = useUiT()          // The hook injects the ui prefix
+t('hero.title')             // Resolves to ui.hero.title
 ```
 
 ```lua
@@ -55,48 +61,50 @@ t('hero.title')   // Hero/locales/zh-CN.ts  { hero: { title } }  →  ui.hero.ti
   root      = 'packages/ui/src',
   discover  = { 'components/*/locales', 'i18n/common' },
   mount     = 'top-key',
-  namespace = 'two-level',   -- useUiT() 注入前缀 ui
+  namespace = 'two-level',
   lang      = '{lang}.ts',
   hooks     = { 'useUiT' },
 }
 ```
 
-### filename —— 命名空间在**文件名 / 路径**（键在文件根，react-i18next 标准）
+### filename: namespace stored in the filename or path
 
-```
+This is the standard `react-i18next` layout, with keys at the file root.
+
+```text
 src/locales/
-  en-US/common.json = { ok: 'OK' }   → 全键  common.ok
-  en-US/home.json                    → 全键  home.*
+  en-US/common.json = { ok: 'OK' }   → common.ok
+  en-US/home.json                    → home.*
   zh-CN/common.json
 ```
 
 ```ts
-const { t } = useTranslation('common')        // hook 参数 = 命名空间
-t('ok')   // locales/zh-CN/common.json  { ok }  →  common.ok
+const { t } = useTranslation('common') // The hook argument supplies the namespace
+t('ok')                                // Resolves to common.ok
 ```
 
 ```lua
 {
   prefix    = '',
   root      = 'src/locales',
-  lang      = '{lang}/{ns}.json',   -- en-US/common.json → lang=en-US, ns=common
+  lang      = '{lang}/{ns}.json',
   mount     = 'filename',
   namespace = 'hook-arg',
   hooks     = { 'useTranslation' },
 }
 ```
 
-### flat —— **无**命名空间
+### flat: no namespace
 
-```
+```text
 locales/
-  zh-CN.ts = { greeting: { hello: '你好' } }   → 全键  greeting.hello
+  zh-CN.ts = { greeting: { hello: 'Hello' } }   → greeting.hello
   en-US.ts
 ```
 
 ```ts
 const { t } = useTranslation()
-t('greeting.hello')   // locales/zh-CN.ts  { greeting: { hello } }  →  greeting.hello
+t('greeting.hello')
 ```
 
 ```lua
@@ -109,96 +117,89 @@ t('greeting.hello')   // locales/zh-CN.ts  { greeting: { hello } }  →  greetin
 }
 ```
 
-### mono-repo —— 一包一源，各自规则（混用上面任意布局）
+### Monorepos: one source per package
+
+Each source may use any layout above:
 
 ```lua
 sources = {
-  { prefix = 'web', root = 'apps/web',        discover = { 'src/locales' },         mount = 'flat',     namespace = 'flat' },
-  { prefix = 'ui',  root = 'packages/ui/src', discover = { 'components/*/locales' }, mount = 'top-key',  namespace = 'two-level', hooks = { 'useUiT' } },
+  { prefix = 'web', root = 'apps/web', discover = { 'src/locales' }, mount = 'flat', namespace = 'flat' },
+  { prefix = 'ui', root = 'packages/ui/src', discover = { 'components/*/locales' }, mount = 'top-key', namespace = 'two-level', hooks = { 'useUiT' } },
 }
 ```
 
-## 四个可配轴（每个都「字面量 | 函数」）
+## Four configurable axes
 
-| 轴          | 作用            | 字面量                                              | 函数                       |
-| ----------- | --------------- | --------------------------------------------------- | -------------------------- |
-| `discover`  | 找 locale 目录  | `{ 'components/*/locales' }`（glob，相对 `root`）   | `fn(root) -> dirs`         |
-| `lang`      | 文件 → 语言码   | `'{lang}.ts'` / `'{lang}/{ns}.json'` / 数组         | `fn(path) -> 'zh-CN'\|nil` |
-| `mount`     | 文件 → 命名空间 | `'top-key'` / `'filename'` / `'flat'`               | `fn(ctx) -> ns`            |
-| `namespace` | 调用点 → 前缀   | `'flat'` / `'hook-arg'` / `'fixed'` / `'two-level'` | `fn(ctx) -> prefix\|nil`   |
+Every axis accepts either a literal strategy or a function.
 
-`namespace` 字面量含义：
+| Axis | Purpose | Literal | Function |
+|------|---------|---------|----------|
+| `discover` | Locate locale directories | `{ 'components/*/locales' }`, a glob relative to `root` | `fn(root) -> dirs` |
+| `lang` | Map a file to a language code | `'{lang}.ts'`, `'{lang}/{ns}.json'`, or an array | `fn(path) -> 'en-US'\|nil` |
+| `mount` | Map a file to a namespace | `'top-key'`, `'filename'`, or `'flat'` | `fn(ctx) -> ns` |
+| `namespace` | Map a call site to a prefix | `'flat'`, `'hook-arg'`, `'fixed'`, or `'two-level'` | `fn(ctx) -> prefix\|nil` |
 
-- `flat`：`t('x')` → `x`
-- `hook-arg`：`useXxx('common')` → 前缀 `common`（`t('ok')` → `common.ok`）
-- `fixed`：固定用 source 的 `prefix`，忽略 hook 参数
-- `two-level`：`prefix[.<hook 参数>]`
+Literal `namespace` strategies mean:
 
-> `prefix` 只写在 source 上，索引侧与调用侧共用（单一真相）。`mount` 与 `namespace` 须配成对
-> （上方每行都成对）
+- `flat`: `t('x')` resolves to `x`
+- `hook-arg`: `useXxx('common')` contributes `common`, so `t('ok')` resolves to `common.ok`
+- `fixed`: always uses the source `prefix` and ignores hook arguments
+- `two-level`: combines `prefix` with an optional hook argument
 
-## 全部配置
+`prefix` belongs only to the source and is shared by indexing and call-site resolution as a single source of truth. Pair `mount` and `namespace` consistently, as in each layout above.
+
+## Complete configuration
 
 ```lua
 require('vv-i18n').setup({
-  root = nil,                          -- nil = 自动探测
-
-  -- 全局默认（每个 source 可覆盖同名字段）
-  hooks = { 'useTranslation' },
+  root = nil,                          -- nil enables automatic detection
+  hooks = { 'useTranslation' },        -- Global defaults, overridable per source
   t = { 't' },
   lang = { '{lang}.ts', '{lang}.json' },
   mount = 'top-key',
   namespace = 'hook-arg',
-
-  sources = { --[[ 见上 ]] },
-
-  -- 高级
-  namespace_separator = ':',           -- 绝对命名空间 ns<sep>key；'' 关闭
+  sources = { --[[ see above ]] },
+  namespace_separator = ':',           -- Absolute namespace ns<sep>key; '' disables it
   key_separator = '.',
-  quote_style = 'auto',                -- 写回引号 single|double|auto
-  indent = nil,                        -- 写回缩进，nil=推断
-  project_config = true,               -- 探测项目根 .vv-i18n.lua（见下）
-  parse = nil,                         -- 自定义读侧解析（非 JS/JSON 格式，见下）
-
+  quote_style = 'auto',                -- single | double | auto when writing
+  indent = nil,                        -- nil infers indentation when writing
+  project_config = true,               -- Detect .vv-i18n.lua at the project root
+  parse = nil,                         -- Custom read-side parser for non-JS/JSON formats
   display = {
     enable = true,
-    preferred_langs = {},              -- 预览首选语言（空=字典序首个）
+    preferred_langs = {},              -- Empty selects the first language alphabetically
     max_width = 40,
-    icon = '󰗊 ',                       -- 译文前缀图标
-    -- 样式：style 直接定义 { fg=, bg=, italic=, bold= }；不给则默认 注释色 + 斜体（随主题）
-    style = nil,                       -- 译文样式（覆盖 hl）
-    missing_style = nil,               -- 缺失样式
-    -- 也可只换高亮组：hl / missing_hl；或 lang（固定预览语言）/ missing_icon
-    render = nil,                      -- 函数完全自定义渲染（见下）
+    icon = '󰗊 ',
+    style = nil,                       -- Translation style overriding its highlight
+    missing_style = nil,
+    -- hl, missing_hl, lang, and missing_icon may also be overridden
+    render = nil,                      -- Fully custom rendering function
   },
 })
 ```
 
-> 预览模式：**conceal 就地替换** —— 隐藏 `t('key')` 里的字符串、inline 插入「图标 + 译文」，
-> **长度随译文动态变化**（代码会随之重排）；**光标落在该 `t()` 上自动还原**原文（token 级，同行多个互不干扰）
-> 缺失键显示 `⚠ 键`。依赖 conceal：开启时给匹配窗口设 `conceallevel=2` / `concealcursor`，关闭时还原
+Preview mode uses **in-place concealment**. It hides the string inside `t('key')` and inserts the icon and translation inline. Its width follows the translated value and reflows surrounding code. Moving the cursor onto that `t()` restores the source token, independently for multiple calls on one line. Missing keys display `⚠ key`. Matching windows temporarily receive `conceallevel=2` and `concealcursor`, and their original values are restored when preview is disabled.
 
-### 自定义渲染 `display.render`
+### Custom `display.render`
 
-收上下文、返回字符串或 virt_text chunks（`nil` 落默认）：
+The renderer receives context and returns a string or virtual-text chunks. Returning `nil` uses the default renderer.
 
 ```lua
 display = {
   render = function(ctx)
-    -- ctx = { full_key, value, lang, kind, missing, per, literal, icon, hl, max_width }
+    -- { full_key, value, lang, kind, missing, per, literal, icon, hl, max_width }
     if ctx.missing then return { { '✗ ' .. ctx.literal, 'Error' } } end
-    return { { ctx.icon, 'Comment' }, { ctx.value, 'String' } }  -- 图标与译文分色
+    return { { ctx.icon, 'Comment' }, { ctx.value, 'String' } }
   end,
 }
 ```
 
-## 项目级配置 `.vv-i18n.lua`
+## Project configuration with `.vv-i18n.lua`
 
-项目根放一个 `.vv-i18n.lua`，**整份覆盖** nvim 里的配置（nvim setup 仅作默认/兜底）。这样一份 nvim 配置
-即可适配多个项目，各自带精确 source：
+Place `.vv-i18n.lua` at a project root to **replace the entire Neovim configuration** for that project. The `setup()` configuration remains the fallback, allowing one editor configuration to support projects with precise, independent sources.
 
 ```lua
--- <项目根>/.vv-i18n.lua
+-- <project-root>/.vv-i18n.lua
 return {
   sources = {
     { prefix = '', discover = { 'src/locales' }, mount = 'filename', namespace = 'hook-arg' },
@@ -206,17 +207,15 @@ return {
 }
 ```
 
-- 从当前文件向上找 `.vv-i18n.lua`；找到则**全覆盖**，找不到回退 nvim 基线
-- **安全**：经 Neovim 内置 `vim.secure` —— 首次加载弹窗确认信任，内容改动后重新确认（信任记录在
-  `stdpath('state')/trust`，由 nvim 维护）
-- 切目录（`:cd`）自动重载；或随时 `:VVI18nReload`。关掉用 `project_config = false`
+- The plugin searches upward from the current file. A discovered file fully replaces the baseline; otherwise the baseline remains active
+- Loading is protected by Neovim's `vim.secure`. The first load asks for trust, and changed content requires confirmation again. Neovim stores trust records under `stdpath('state')/trust`
+- Changing directories with `:cd` reloads the configuration automatically; `:VVI18nReload` reloads on demand. Set `project_config = false` to disable discovery
 
-## 自定义解析 `parse`（读侧，任意格式）
+## Custom read-side parsing
 
-默认解析器只认 JS/TS 对象 + JSON。其它格式（YAML / `.properties` / PO …）传一个 `parse` 函数（全局或 per-source）：收文件内容、返回叶子列表,即得**预览 / 跳转 / 完整度**
+The default parser recognizes JS/TS objects and JSON. For YAML, `.properties`, PO, or another format, provide `parse` globally or per source. It receives the file content and path and returns leaves, enabling previews, definition jumps, and completeness checks.
 
 ```lua
--- 例：key=value 行格式
 parse = function(content, path)
   local leaves, top, row = {}, {}, 0
   for line in (content .. '\n'):gmatch('([^\n]*)\n') do
@@ -231,24 +230,23 @@ parse = function(content, path)
 end
 ```
 
-- 返回 `{ leaves = VVI18nLeaf[], top_keys? }`;`leaf = { path=string[], dotted, kind='string', value, row, col }`(`row/col` 0-based,供跳转)
-- **仅读侧**。写回（`:VVI18nEdit` / `AddKey` / `SetValue`）仍是 tree-sitter 字节段引擎,对自定义格式不可用
+Return `{ leaves = VVI18nLeaf[], top_keys? }`, where each leaf is `{ path=string[], dotted, kind='string', value, row, col }`; `row` and `col` are zero-based definition positions. This hook is **read-only**. Write operations such as `:VVI18nEdit`, `:VVI18nAddKey`, and `:VVI18nSetValue` still use the treesitter byte-range engine and are unavailable for custom formats.
 
-## 命令
+## Commands
 
-| 命令                               | 作用                           |
-| ---------------------------------- | ------------------------------ |
-| `:VVI18nKeys`                      | 键浏览 / 完整度 / 同步编辑面板 |
-| `:VVI18nMissing`                   | 仅缺失 key，按缺失语言分组     |
-| `:VVI18nEdit`                      | 光标处键的多语言同步编辑浮窗   |
-| `:VVI18nInfo`                      | 光标处键各语言译文             |
-| `:VVI18nJump`                      | 跳到 locale 定义               |
-| `:VVI18nSetValue`                  | 改某语言值（单语言快速）       |
-| `:VVI18nAddKey`                    | 补缺失语言                     |
-| `:VVI18nReload`                    | 重建索引                       |
-| `:VVI18n[Enable\|Disable\|Toggle]` | 行内预览开关                   |
+| Command | Action |
+|---------|--------|
+| `:VVI18nKeys` | Browse keys, inspect completeness, and synchronize values |
+| `:VVI18nMissing` | Show only missing keys, grouped by missing language |
+| `:VVI18nEdit` | Edit all language values for the key under the cursor |
+| `:VVI18nInfo` | Show every translation for the key under the cursor |
+| `:VVI18nJump` | Jump to a locale definition |
+| `:VVI18nSetValue` | Quickly update one language |
+| `:VVI18nAddKey` | Add missing language values |
+| `:VVI18nReload` | Rebuild the index |
+| `:VVI18nEnable`, `:VVI18nDisable`, `:VVI18nToggle` | Control inline previews |
 
-## 测试
+## Tests
 
 ```bash
 bash tests/run.sh
