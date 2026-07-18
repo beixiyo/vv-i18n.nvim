@@ -184,7 +184,7 @@ local function render()
   end
 
   lines[#lines + 1] = ''
-  local footer = '  j/k Move · h/l Fold · e/<CR> Edit · m Miss · g Group · g? Help · q Close'
+  local footer = '  Move J/K · Fold H/L · Edit E/↵ · Miss M · Group G · Help G? · Close Q'
   lines[#lines + 1] = footer
   mark(#lines - 1, 0, #footer, 'VVI18nPanelFooter')
 
@@ -335,7 +335,7 @@ local function create_buf()
 
   -- 鼠标：左键松开 = 进入；屏蔽默认 visual 选区（拖拽 / 多击 / 右键，含跨窗兜底）
   map('<LeftRelease>', on_enter, 'click')
-  pcall(require('vv-utils.mouse').guard_panel, buf)
+  pcall(require('vv-utils.mouse').block_visual_drag, buf)
 
   return buf
 end

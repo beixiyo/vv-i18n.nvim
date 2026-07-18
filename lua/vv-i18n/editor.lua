@@ -206,7 +206,7 @@ function M.open(plugin, full_key, opts)
     border = 'rounded',
     title = ' 󰗊 ' .. full_key .. ' ',
     title_pos = 'center',
-    footer = ' i edit · <CR> save · q close ',
+    footer = ' Edit I · Save ↵ · Close Q ',
     footer_pos = 'center',
   })
   vim.wo[win].winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder'

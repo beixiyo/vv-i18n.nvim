@@ -86,7 +86,7 @@ local function build_lines(plugin, full_key, per, note)
   end
 
   lines[#lines + 1] = ''
-  local footer = '  e/<CR> Edit · r Reload · y Copy · q Close'
+  local footer = '  Edit E/↵ · Reload R · Copy Y · Close Q'
   lines[#lines + 1] = footer
   add_hl(#lines - 1, 0, #footer, 'VVI18nInfoFooter')
 
