@@ -5,7 +5,7 @@
 -- locale 来源 / 文件→语言 / 文件→命名空间(mount) / 调用点→前缀(namespace) 均「字面量或函数」
 --
 -- 内核全 tree-sitter：ast / reader / index / writer / resolver / display / editor / panel
--- 依赖：Neovim >= 0.13、tree-sitter typescript/tsx、vv-utils。布局与配置见 README
+-- 依赖：Neovim >= 0.10、tree-sitter typescript/tsx、vv-utils。布局与配置见 README
 --
 -- 用户命令：VVI18nKeys / Missing / Edit / Info / Jump / SetValue / AddKey / Reload / 预览开关
 local ast = require('vv-i18n.ast')

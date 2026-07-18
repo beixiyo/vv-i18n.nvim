@@ -140,7 +140,7 @@ local function render()
 
   if total == 0 then
     lines[#lines + 1] = ''
-    local s = '  (无键，:VVI18nReload 重建索引)'
+    local s = '  (No keys. Run :VVI18nReload to rebuild the index.)'
     lines[#lines + 1] = s
     mark(#lines - 1, 0, #s, 'VVI18nPanelEmpty')
   else
@@ -174,7 +174,7 @@ local function render()
             local vt = { { '  ', 'Normal' } }
             for _, c in ipairs(badge(g, k)) do vt[#vt + 1] = c end
             if #k.missing > 0 then
-              vt[#vt + 1] = { '  缺 ' .. table.concat(k.missing, ','), 'VVI18nPanelMiss' }
+              vt[#vt + 1] = { '  Missing: ' .. table.concat(k.missing, ','), 'VVI18nPanelMiss' }
             end
             marks[#marks + 1] = { li, #line, { virt_text = vt, virt_text_pos = 'eol' } }
           end
@@ -184,7 +184,7 @@ local function render()
   end
 
   lines[#lines + 1] = ''
-  local footer = '  Move J/K · Fold H/L · Edit E/↵ · Miss M · Group G · Help G? · Close Q'
+  local footer = '  j/k Move · h/l Fold · e/<CR> Edit · m Miss · g Group · g? Help · q Close'
   lines[#lines + 1] = footer
   mark(#lines - 1, 0, #footer, 'VVI18nPanelFooter')
 

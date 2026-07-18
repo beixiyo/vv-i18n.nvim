@@ -7,7 +7,7 @@
 -- find_export_object，已按本模块需要重写
 local M = {}
 
---- 节点字节范围。`node:start()` / `node:end_()` 第 3 个返回值即字节偏移（nvim 0.13 可用）
+--- 节点字节范围。`node:start()` / `node:end_()` 第 3 个返回值即字节偏移（nvim 0.10 可用）
 ---@param node TSNode
 ---@return integer start_byte 0-based, inclusive
 ---@return integer end_byte   0-based, exclusive
