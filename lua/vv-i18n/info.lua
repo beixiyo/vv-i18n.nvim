@@ -121,8 +121,10 @@ local function edit()
   if not state then return end
   local plugin = state.plugin
   local full_key = state.full_key
+  local target_win = state.target_win
   close()
   require('vv-i18n.editor').open(plugin, full_key, {
+    target_win = target_win,
     on_saved = function()
       plugin.reload()
     end,
@@ -139,6 +141,7 @@ end
 function M.open(plugin, full_key, opts)
   opts = opts or {}
   if state and state.win and vim.api.nvim_win_is_valid(state.win) then close() end
+  local target_win = vim.api.nvim_get_current_win()
 
   local per = plugin.lookup(full_key)
   local lines = build_lines(plugin, full_key, per, opts.note)
@@ -177,6 +180,7 @@ function M.open(plugin, full_key, opts)
     full_key = full_key,
     per = per,
     note = opts.note,
+    target_win = target_win,
   }
   render()
 

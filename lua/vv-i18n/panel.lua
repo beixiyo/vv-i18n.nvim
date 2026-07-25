@@ -1,7 +1,7 @@
 -- vv-i18n.panel — 键浏览 / 完整度树 / 同步编辑入口（对标 lokalise 键列表）
 --
 -- 按挂载点（hero/common/…）分组列出所有键，每行示主语言译文 + 各语言完整度
--- 勾叉徽标；<CR> 打开多语言同步编辑浮窗（editor.lua）。窗口骨架照 vv-flow/panel
+-- 勾叉徽标；<CR> 打开多语言同步编辑浮窗（editor/）。窗口骨架照 vv-flow/panel
 local hl = require('vv-utils.hl')
 local util = require('vv-i18n.util')
 local truncate = util.truncate
@@ -248,6 +248,7 @@ local function on_enter()
   elseif info.kind == 'key' then
     require('vv-i18n.editor').open(state.plugin, info.key.full, {
       focus_lang = info.key.target_lang,
+      target_win = state.prev_win,
       on_saved = function()
         state.plugin.reload()
         rebuild()

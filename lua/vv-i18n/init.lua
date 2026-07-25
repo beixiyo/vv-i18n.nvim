@@ -484,7 +484,10 @@ end
 function M.edit_cursor()
   local res = M.resolve_cursor()
   if not res.ok then return notify('光标处无 i18n 键：' .. (res.reason or '?'), vim.log.levels.WARN) end
-  require('vv-i18n.editor').open(M, res.full_key, { on_saved = function() M.reload() end })
+  require('vv-i18n.editor').open(M, res.full_key, {
+    target_win = vim.api.nvim_get_current_win(),
+    on_saved = function() M.reload() end,
+  })
 end
 
 --- 写回选项（editor 用）

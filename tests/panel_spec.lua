@@ -59,6 +59,7 @@ end
 check('真实 fixture 未被改动（全程 dry-run）', H.read(HERO_ZH) == orig)
 
 -- panel：真开窗读 buffer
+local source_win = vim.api.nvim_get_current_win()
 panel.open(i18n)
 local pbuf = vim.api.nvim_get_current_buf()
 local function panel_lines()
@@ -83,6 +84,12 @@ local function run_map(lhs)
     end
   end
   return false
+end
+
+local function find_map(buf, mode, lhs)
+  for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, mode)) do
+    if m.lhs == lhs then return m end
+  end
 end
 
 local joined = joined_panel()
@@ -128,17 +135,145 @@ if missing_lnum then
   vim.api.nvim_win_set_cursor(0, { missing_lnum, 0 })
   check('missing panel e 打开编辑器', run_map('e'))
   local edit_buf = vim.api.nvim_get_current_buf()
+  local edit_win = vim.api.nvim_get_current_win()
   local edit_lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
   local rows = editor.plan(i18n, 'app.common.cancel')
   local ja_lnum
+  local lang_width = 0
   for i, row in ipairs(rows or {}) do
-    if row.lang == 'ja-JP' then ja_lnum = i end
+    local name = row.label or row.lang
+    lang_width = math.max(lang_width, vim.fn.strdisplaywidth(name))
+    if row.lang == 'ja-JP' then
+      ja_lnum = i
+    end
   end
+  local value_col = lang_width + 3
+
   check('缺失编辑器已打开', vim.bo[edit_buf].filetype == 'vv-i18n-editor')
-  check('编辑器聚焦 ja-JP 缺失行', ja_lnum and vim.api.nvim_win_get_cursor(0)[1] == ja_lnum)
-  check('ja-JP 缺失行是输入槽', ja_lnum and edit_lines[ja_lnum]:match('^%s+$') ~= nil)
-  check('编辑器光标在值列', vim.api.nvim_win_get_cursor(0)[2] > 0)
-  require('vv-i18n.editor')._close()
+  check('所有语言共用单窗口单光标', rows and #edit_lines == #rows and vim.api.nvim_get_current_win() == edit_win)
+  check('输入区没有 cursorline 背景', not vim.wo[edit_win].cursorline
+    and not vim.wo[edit_win].winhighlight:find('CursorLine', 1, true))
+  check('编辑器聚焦 ja-JP 缺失输入框', ja_lnum and vim.api.nvim_win_get_cursor(0)[1] == ja_lnum)
+
+  local footer = vim.api.nvim_win_get_config(edit_win).footer or {}
+  local footer_text = ''
+  for _, chunk in ipairs(footer) do footer_text = footer_text .. (chunk[1] or '') end
+  check('footer 使用快捷键符号', footer_text:find('Jump ↵', 1, true) ~= nil
+    and footer_text:find('Save ^s', 1, true) ~= nil
+    and footer_text:find('<CR>', 1, true) == nil)
+
+  local editor_ns = vim.api.nvim_get_namespaces().vv_i18n_editor
+  local marks = vim.api.nvim_buf_get_extmarks(edit_buf, editor_ns, { ja_lnum - 1, 0 }, { ja_lnum - 1, -1 }, { details = true })
+  local label = marks[1] and marks[1][4].virt_text and marks[1][4].virt_text[1][1] or ''
+  check('语言标签使用 overlay 虚拟文本', label:find('ja-JP', 1, true) ~= nil
+    and edit_lines[ja_lnum]:find('ja-JP', 1, true) == nil)
+
+  vim.api.nvim_win_set_cursor(0, { ja_lnum, 0 })
+  vim.api.nvim_exec_autocmds('CursorMoved', { buffer = edit_buf })
+  check('光标不会落在语言标签上', vim.api.nvim_win_get_cursor(0)[2] > lang_width)
+
+  check('编辑器 normal <C-S> 映射存在', find_map(edit_buf, 'n', '<C-S>') ~= nil)
+  check('编辑器 insert <C-S> 映射存在', find_map(edit_buf, 'i', '<C-S>') ~= nil)
+  check('编辑器 <CR> 跳转映射存在', find_map(edit_buf, 'n', '<CR>') ~= nil)
+  check('编辑器 insert <CR> 跳转映射存在', find_map(edit_buf, 'i', '<CR>') ~= nil)
+
+  vim.api.nvim_buf_set_lines(edit_buf, ja_lnum - 1, ja_lnum, false, {
+    string.rep(' ', value_col) .. 'draft',
+  })
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit_buf })
+  local jump_map = find_map(edit_buf, 'n', '<CR>')
+  if jump_map and jump_map.callback then jump_map.callback() end
+  check('未保存修改会阻止跳转', vim.api.nvim_win_is_valid(edit_win)
+    and vim.api.nvim_get_current_buf() == edit_buf)
+
+  local close_map = find_map(edit_buf, 'n', 'q')
+  local confirm = vim.fn.confirm
+  vim.fn.confirm = function() return 2 end
+  if close_map and close_map.callback then close_map.callback() end
+  vim.fn.confirm = confirm
+  check('关闭确认选择 No 时保留编辑器', vim.api.nvim_win_is_valid(edit_win)
+    and vim.api.nvim_get_current_buf() == edit_buf)
+
+  vim.api.nvim_feedkeys(vim.keycode('dd'), 'mx', false)
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit_buf })
+  local cleared = vim.api.nvim_buf_get_lines(edit_buf, ja_lnum - 1, ja_lnum, false)[1] or ''
+  check('真实 dd 只清空当前输入框', vim.api.nvim_buf_line_count(edit_buf) == #rows
+    and cleared == string.rep(' ', value_col))
+  check('dd 后光标仍在值区域起点', vim.api.nvim_win_get_cursor(edit_win)[2] == value_col)
+
+  local backspace_map = find_map(edit_buf, 'i', '<BS>')
+  local boundary_result = backspace_map and backspace_map.callback and backspace_map.callback()
+  check('Backspace 到边界后直接吞键', boundary_result == '', vim.inspect(boundary_result))
+
+  vim.api.nvim_buf_set_lines(edit_buf, ja_lnum - 1, ja_lnum, false, {
+    string.rep(' ', value_col) .. 'a',
+  })
+  vim.api.nvim_win_set_cursor(edit_win, { ja_lnum, value_col + 1 })
+  local content_result = backspace_map and backspace_map.callback and backspace_map.callback()
+  check('Backspace 在内容区返回真实删除键', content_result ~= '' and content_result ~= '<Nop>',
+    vim.inspect(content_result))
+  vim.api.nvim_buf_set_lines(edit_buf, ja_lnum - 1, ja_lnum, false, {
+    string.rep(' ', value_col),
+  })
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit_buf })
+
+  vim.api.nvim_win_set_cursor(edit_win, { ja_lnum, value_col })
+  vim.api.nvim_feedkeys('X', 'nx', false)
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit_buf })
+  local after_x = vim.api.nvim_buf_get_lines(edit_buf, ja_lnum - 1, ja_lnum, false)[1] or ''
+  check('X 不会破坏标签占位列', after_x == string.rep(' ', value_col), vim.inspect(after_x))
+
+  local stable_lines = vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false)
+  vim.api.nvim_buf_set_lines(edit_buf, ja_lnum - 1, ja_lnum, false, {})
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit_buf })
+  check('结构性删行会恢复输入框', vim.deep_equal(
+    vim.api.nvim_buf_get_lines(edit_buf, 0, -1, false),
+    stable_lines
+  ))
+
+  local save_map = find_map(edit_buf, 'n', '<C-S>')
+  if save_map and save_map.callback then save_map.callback() end
+  check('编辑器保存后窗口保持打开', vim.api.nvim_get_current_buf() == edit_buf)
+
+  local jump_lnum, jump_entry
+  local per = i18n.lookup('app.common.cancel')
+  for i, row in ipairs(rows or {}) do
+    if per and per[row.lang] then
+      jump_lnum = i
+      jump_entry = per[row.lang]
+      break
+    end
+  end
+  vim.api.nvim_win_set_cursor(edit_win, { jump_lnum, value_col })
+  vim.api.nvim_feedkeys('i' .. vim.keycode('<CR>'), 'mx', false)
+  check('编辑器 <CR> 关闭浮窗并打开 locale 文件', jump_entry
+    and not vim.api.nvim_win_is_valid(edit_win)
+    and vim.api.nvim_buf_get_name(0) == jump_entry.file)
+  check('编辑器跳回 panel 打开前的来源窗口', vim.api.nvim_get_current_win() == source_win)
+  check('编辑器 <CR> 定位当前语言 key', jump_entry
+    and vim.api.nvim_win_get_cursor(0)[1] == (jump_entry.row or 0) + 1)
+
+  editor.open(i18n, 'app.common.cancel', {
+    focus_lang = 'ja-JP',
+    target_win = source_win,
+  })
+  local discard_buf = vim.api.nvim_get_current_buf()
+  local discard_win = vim.api.nvim_get_current_win()
+  local discard_rows = editor.plan(i18n, 'app.common.cancel')
+  local discard_lnum
+  for i, row in ipairs(discard_rows or {}) do
+    if row.lang == 'ja-JP' then discard_lnum = i; break end
+  end
+  vim.api.nvim_buf_set_lines(discard_buf, discard_lnum - 1, discard_lnum, false, {
+    string.rep(' ', value_col) .. 'discard me',
+  })
+  vim.api.nvim_exec_autocmds('TextChanged', { buffer = discard_buf })
+  local discard_map = find_map(discard_buf, 'n', 'q')
+  confirm = vim.fn.confirm
+  vim.fn.confirm = function() return 1 end
+  if discard_map and discard_map.callback then discard_map.callback() end
+  vim.fn.confirm = confirm
+  check('关闭确认选择 Yes 时丢弃修改并关闭', not vim.api.nvim_win_is_valid(discard_win))
 end
 panel.close()
 
