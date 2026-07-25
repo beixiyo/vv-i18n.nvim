@@ -1,7 +1,7 @@
 <div align="center">
   <h1>vv-i18n.nvim</h1>
   <p>English | <a href="./README.zh-CN.md">中文</a></p>
-  <img src="./docs/assets/vv-i18n.png" alt="vv-i18n demo" width="900" />
+  <img src="https://github.com/beixiyo/vv-i18n.nvim/releases/download/assets-2026-07-25/vv-i18n.png" alt="vv-i18n demo" width="900" />
   <p>Want my Neovim config? See <a href="https://github.com/beixiyo/dotfiles">dotfiles</a></p>
   <p><strong>Inline previews, definition jumps, synchronized edits, and missing-locale completion for TS/TSX i18n</strong>, inspired by <em>lokalise</em> and <em>i18n-ally</em></p>
   <p>

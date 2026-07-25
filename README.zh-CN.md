@@ -1,7 +1,7 @@
 <div align="center">
   <h1>vv-i18n.nvim</h1>
   <p><a href="./README.md">English</a> | 中文</p>
-  <img src="./docs/assets/vv-i18n.png" alt="vv-i18n 演示" width="900" />
+  <img src="https://github.com/beixiyo/vv-i18n.nvim/releases/download/assets-2026-07-25/vv-i18n.png" alt="vv-i18n 演示" width="900" />
   <p>想要我的 Neovim 配置？查看 <a href="https://github.com/beixiyo/dotfiles">dotfiles</a></p>
   <p><strong>TS/TSX i18n 的行内预览 / 跳转定义 / 同步改值 / 补缺失语言</strong>，对标 <em>lokalise</em> · <em>i18n-ally</em></p>
   <p>
