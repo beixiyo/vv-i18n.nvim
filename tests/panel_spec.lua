@@ -6,13 +6,20 @@ local H = dofile(SPEC_DIR .. '/helper.lua')
 local i18n = require('vv-i18n')
 local editor = require('vv-i18n.editor')
 local panel = require('vv-i18n.panel')
+local State = require('vv-utils.state')
 
 local check, done = H.checker()
+local panel_state_path = vim.fn.tempname()
+local panel_state = State.register('vv-i18n-test', 'keys-panel', {
+  path = panel_state_path,
+})
 
 local HERO_ZH = H.fixture('ns-app/src/components/Hero/locales/zh-CN.ts')
 local orig = H.read(HERO_ZH)
 
-i18n.setup(H.ns_config())
+local config = H.ns_config()
+config.panel = { state = panel_state }
+i18n.setup(config)
 i18n.reload()
 
 -- editor.plan：已存在键 → 各语言行（en-US < zh-CN 字典序）
@@ -93,10 +100,48 @@ local function find_map(buf, mode, lhs)
 end
 
 local joined = joined_panel()
+check('keys panel 复用 vv-utils tree-panel',
+  vim.api.nvim_buf_get_name(pbuf) == 'vv-tree-panel://vv-i18n-keys',
+  vim.api.nvim_buf_get_name(pbuf))
 check('panel 含 hero 组', joined:find('hero', 1, true) ~= nil)
 check('panel 含 title 键', joined:find('title', 1, true) ~= nil)
 check('panel 含译文(Hero/英雄)', joined:find('Hero', 1, true) ~= nil or joined:find('英雄', 1, true) ~= nil)
 check('panel 标题含 i18n keys', joined:find('i18n keys', 1, true) ~= nil)
+check('panel 顶部包含真实语言选择器',
+  joined:find('Languages', 1, true) ~= nil
+    and joined:find('● en-US', 1, true) ~= nil
+    and joined:find('[LANGUAGES', 1, true) == nil)
+local panel_winbar = vim.wo[0].winbar
+check('快捷键提示固定在顶部 winbar',
+  panel_winbar:find('h/l Fold', 1, true) ~= nil
+    and joined:find('h/l Fold', 1, true) == nil)
+check('panel 默认包含 C-n/C-p 导航',
+  find_map(pbuf, 'n', '<C-N>') ~= nil and find_map(pbuf, 'n', '<C-P>') ~= nil)
+check('业务映射通过通用 mapping spec 提供帮助描述',
+  find_map(pbuf, 'n', 'm').desc == 'vv-tree-panel: only_missing'
+    and find_map(pbuf, 'n', 'g').desc == 'vv-tree-panel: group_by_missing_lang')
+
+local zh_lnum = find_line('zh-CN')
+check('panel 找到 zh-CN 语言节点', zh_lnum ~= nil)
+if zh_lnum then
+  vim.api.nvim_win_set_cursor(0, { zh_lnum, 0 })
+  check('语言节点 Enter 映射存在', run_map('<CR>'))
+  check('Enter 切换语言后 panel 保持打开',
+    vim.api.nvim_get_current_buf() == pbuf)
+  check('语言选择状态切换到 zh-CN',
+    joined_panel():find('● zh-CN', 1, true) ~= nil)
+  local switched_title = find_line('title')
+  check('key 预览跟随切换为 zh-CN',
+    switched_title
+      and panel_lines()[switched_title]:find('英雄', 1, true) ~= nil,
+    switched_title and panel_lines()[switched_title])
+end
+
+vim.cmd('vertical resize 48')
+vim.api.nvim_exec_autocmds('WinResized', {})
+check('keys panel 宽度写入通用状态仓库', vim.wait(500, function()
+  return panel_state:get('width') == 48
+end), panel_state:get('width'))
 
 local title_lnum = find_line('title')
 check('panel 找到 title 行', title_lnum ~= nil)
@@ -116,6 +161,10 @@ if title_lnum then
     check('panel l 可展开组', joined_panel():find('title', 1, true) ~= nil)
   end
 end
+
+vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(pbuf), 0 })
+vim.cmd('normal! zt')
+check('滚动 keys 后固定快捷键提示仍存在', vim.wo[0].winbar == panel_winbar)
 
 check('panel g? 映射存在', run_map('g?'))
 local help_buf = vim.api.nvim_get_current_buf()
@@ -249,6 +298,7 @@ if missing_lnum then
   check('编辑器 <CR> 关闭浮窗并打开 locale 文件', jump_entry
     and not vim.api.nvim_win_is_valid(edit_win)
     and vim.api.nvim_buf_get_name(0) == jump_entry.file)
+  check('编辑器跳转后 keys panel 自动关闭', #vim.fn.win_findbuf(pbuf) == 0)
   check('编辑器跳回 panel 打开前的来源窗口', vim.api.nvim_get_current_win() == source_win)
   check('编辑器 <CR> 定位当前语言 key', jump_entry
     and vim.api.nvim_win_get_cursor(0)[1] == (jump_entry.row or 0) + 1)
@@ -276,6 +326,11 @@ if missing_lnum then
   check('关闭确认选择 Yes 时丢弃修改并关闭', not vim.api.nvim_win_is_valid(discard_win))
 end
 panel.close()
+panel.open(i18n)
+check('keys panel 重新打开恢复宽度', vim.api.nvim_win_get_width(0) == 48,
+  vim.api.nvim_win_get_width(0))
+panel.close()
+vim.fn.delete(panel_state_path)
 
 done()
 vim.cmd('qa!')

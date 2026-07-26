@@ -1,0 +1,94 @@
+-- LuaLS-only public type declarations. Runtime code must not depend on this module.
+---@class VVI18nSource
+---@field prefix? string         命名空间根；''=无前缀 @default ''
+---@field root? string           本源扫描根（相对 config.root 或绝对） @default config.root
+---@field discover? string[]|fun(root: string): string[]  发现 locale 目录：glob 数组 或 函数 @default nil
+---@field dirs? string[]         显式 locale 目录（与 discover 叠加） @default nil
+---@field lang? string|string[]|fun(path): (string|table|nil)  文件→语言（覆盖全局）
+---@field mount? 'top-key'|'filename'|'flat'|fun(ctx): string?  文件→命名空间（覆盖全局）
+---@field namespace? 'flat'|'hook-arg'|'fixed'|'two-level'|fun(ctx): string?  调用点→前缀（覆盖全局）
+---@field hooks? string[]        产出 t 的 hook 名（覆盖全局）
+---@field t? string[]            翻译函数名（覆盖全局）
+---@field parse? fun(content: string, path: string): table?  自定义读侧解析（覆盖全局）
+
+---@class VVI18nConfig
+---@field root? string           项目根；nil=自动探测 @default nil
+---@field sources VVI18nSource[]  locale 来源（必填，可多个） @default {}
+---@field hooks string[]         全局默认 hook 名 @default {'useTranslation'}
+---@field t string[]             全局默认翻译函数名 @default {'t'}
+---@field lang string|string[]|function  全局默认 文件→语言 @default {'{lang}.ts','{lang}.tsx','{lang}.js','{lang}.json'}
+---@field mount string|function  全局默认 mount @default 'top-key'
+---@field namespace string|function  全局默认 namespace @default 'hook-arg'
+---@field namespace_separator string  绝对命名空间 ns<sep>key @default ':'
+---@field key_separator string   全键各段连接符 @default '.'
+---@field quote_style 'single'|'double'|'auto'  写回引号 @default 'auto'
+---@field indent? string         写回缩进；nil=推断 @default nil
+---@field display VVI18nDisplayConfig
+---@field panel VVI18nKeyPanelConfig
+---@field references VVI18nReferencesConfig
+---@field ft string[]            生效文件类型 @default ts/tsx/js/jsx
+---@field project_config boolean 探测项目根 .vv-i18n.lua（首次信任后全覆盖本配置） @default true
+---@field parse? fun(content: string, path: string): table?  自定义读侧解析（YAML/PO 等）；返回 { leaves: VVI18nLeaf[], top_keys?: string[] }。nil=默认 tree-sitter（JS/JSON）
+
+---@class VVI18nLeaf  自定义 parse 须返回的叶子（与默认 reader 同形）
+---@field path string[]          文件内逐层 key，如 { 'hero', 'title' }
+---@field dotted string          点号路径 'hero.title'（拼全键用）
+---@field kind 'string'|'array'|'other'  仅 'string' 可同步编辑
+---@field value string           string→真实值；其它→原始文本
+---@field row integer            值起点行（0-based，跳转用）
+---@field col integer            值起点列（0-based）
+
+---@class VVI18nDisplayConfig
+---@field enable boolean         @default true
+---@field lang? string           固定预览语言 @default nil
+---@field preferred_langs string[]  预览首选语言优先级 @default {}
+---@field max_width integer      译文最大显示宽度 @default 40
+---@field icon string            译文前缀图标 @default '󰗊 '
+---@field missing_icon string    @default '⚠ '
+---@field hl string              译文高亮组 @default 'VVI18nPreview'
+---@field missing_hl string      缺失高亮组 @default 'VVI18nMissing'
+---@field style? vim.api.keyset.highlight  直接定义译文样式；nil=默认 注释色+斜体
+---@field missing_style? vim.api.keyset.highlight  缺失样式；nil=默认 link DiagnosticVirtualTextWarn
+---@field render? fun(ctx: VVI18nRenderCtx): (string|table[]|nil)  自定义渲染：返回字符串 / virt_text chunks / nil(落默认)
+
+---@class VVI18nKeyPanelConfig
+---@field width integer          键浏览侧栏宽度 @default 56
+---@field position 'left'|'right'  侧栏位置 @default 'right'
+---@field state? VVStateHandle   宽度持久状态；默认注册 vv-i18n/keys @default nil
+---@field mappings? false|VVTreePanelMappings  快捷键；table=完全自定义，false=不注册 @default nil
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口
+---@field help? false|VVTreePanelHelpOptions  g? 帮助面板配置 @default nil
+---@field render? VVTreePanelRenderers  winbar/header/node/empty/footer 自定义渲染
+
+---@class VVI18nRenderCtx  display.render 收到的上下文
+---@field full_key string        完整键（含前缀/命名空间）
+---@field value? string          选中语言的译文（缺失/非字符串时为 nil）
+---@field lang? string           选中的预览语言
+---@field kind 'hit'|'missing'   命中 / 缺失
+---@field missing boolean
+---@field per table              该键各语言条目
+---@field literal string         源码里 t() 的字面量键
+---@field icon string            配置的图标
+---@field hl string              配置的高亮组
+---@field max_width integer
+
+---@class VVI18nReferencesConfig
+---@field enable boolean         扫描项目引用并在定义处显示计数 @default true
+---@field icon string            定义处引用数图标 @default '󰗊 '
+---@field hl string              定义处引用数高亮 @default 'Comment'
+---@field jump_single boolean    单个引用时直接跳转，不打开侧栏 @default false
+---@field show_zero boolean      是否显示零引用虚拟文本 @default false
+---@field render? fun(ctx: table): (string|table[]|nil)  定义处虚拟文本自定义渲染
+---@field panel VVI18nReferencesPanelConfig
+
+---@class VVI18nReferencesPanelConfig
+---@field width integer          侧栏宽度 @default 62
+---@field position 'left'|'right'  侧栏位置 @default 'right'
+---@field preview_debounce_ms integer  光标预览防抖 @default 80
+---@field state? VVStateHandle   侧栏状态；默认注册 vv-i18n/references @default nil
+---@field mappings? false|VVTreePanelMappings  快捷键；table=完全自定义，false=不注册 @default nil
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口
+---@field help? false|VVTreePanelHelpOptions  g? 帮助面板配置 @default nil
+---@field render? fun(ctx: VVTreePanelRenderContext): VVTreePanelRenderRow|string  节点自定义渲染
+
+return {}

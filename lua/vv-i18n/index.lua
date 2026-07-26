@@ -49,6 +49,13 @@ local function langs_missing(mount, per)
   return out
 end
 
+---@class VVI18nIndex
+---@field prefix string
+---@field key_sep string
+---@field mount_kind string
+---@field mounts table<string, { langs: string[], files: table<string, string> }>
+---@field keys table<string, table<string, table>>
+---@field langs string[]
 local Index = {}
 Index.__index = Index
 
@@ -206,7 +213,7 @@ end
 
 --- 构建索引（一个 source 一个 index）
 ---@param opts { dirs: string[], prefix?: string, key_separator?: string, mount?: any, lang?: any, parse?: fun(content: string, path: string): table? }
----@return Index index
+---@return VVI18nIndex index
 ---@return table[] errors  解析失败清单（不静默吞）
 function M.build(opts)
   opts = opts or {}

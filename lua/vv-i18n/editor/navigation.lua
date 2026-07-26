@@ -39,7 +39,9 @@ function M.jump(state, row, close)
   end
 
   local target_win = state.target_win
+  local on_jump = state.on_jump
   close()
+  if on_jump then pcall(on_jump, entry) end
   if target_win and vim.api.nvim_win_is_valid(target_win) then
     vim.api.nvim_set_current_win(target_win)
   end

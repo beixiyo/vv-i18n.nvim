@@ -179,12 +179,25 @@ require('vv-i18n').setup({
     -- 也可只换高亮组：hl / missing_hl；或 lang（固定预览语言）/ missing_icon
     render = nil,                      -- 函数完全自定义渲染（见下）
   },
+  panel = {
+    width = 56,
+    position = 'right',
+    state = nil,                       -- 默认使用共享状态 vv-i18n/keys
+    mappings = nil,                    -- nil=默认，false=不注册，table=完整替换
+    on_attach = nil,
+    help = nil,
+    render = nil,                      -- 自定义 winbar/header/node/empty/footer
+  },
+  references = {
+    enable = true,
+    icon = '󰗊 ',
+    hl = 'Comment',
+    jump_single = false,               -- 只有一个引用时直接跳转
+    show_zero = false,                 -- 显示“0 references”虚拟文本
+    panel = { width = 62, position = 'right', preview_debounce_ms = 80 },
+  },
 })
 ```
-
-> 预览模式：**conceal 就地替换** —— 隐藏 `t('key')` 里的字符串、inline 插入「图标 + 译文」，
-> **长度随译文动态变化**（代码会随之重排）；**光标落在该 `t()` 上自动还原**原文（token 级，同行多个互不干扰）
-> 缺失键显示 `⚠ 键`。依赖 conceal：开启时给匹配窗口设 `conceallevel=2` / `concealcursor`，关闭时还原
 
 ### 自定义渲染 `display.render`
 
@@ -248,6 +261,7 @@ end
 | ---------------------------------- | ------------------------------ |
 | `:VVI18nKeys`                      | 键浏览 / 完整度 / 同步编辑面板 |
 | `:VVI18nMissing`                   | 仅缺失 key，按缺失语言分组     |
+| `:VVI18nReferences`                | 打开当前 key 的可折叠引用侧栏  |
 | `:VVI18nEdit`                      | 光标处键的多语言同步编辑浮窗   |
 | `:VVI18nInfo`                      | 光标处键各语言译文             |
 | `:VVI18nJump`                      | 跳到 locale 定义               |

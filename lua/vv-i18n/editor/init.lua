@@ -8,6 +8,20 @@ local navigation = require('vv-i18n.editor.navigation')
 
 local M = {}
 
+---@class VVI18nEditorState
+---@field buf integer
+---@field win integer
+---@field full_key string
+---@field rows table[]
+---@field lang_width integer
+---@field value_col integer
+---@field last_lines string[]
+---@field target_win? integer
+---@field on_saved? fun(changed: integer)
+---@field on_jump? fun(entry: table)
+---@field plugin table
+
+---@type VVI18nEditorState?
 local state = nil
 
 local function close()
@@ -87,7 +101,8 @@ local function install_keymaps(buf)
       desc = 'vv-i18n: editor',
     }, opts or {}))
   end
-  local row = function() return fields.current_row(state) end
+  ---@return integer
+  local row = function() return assert(fields.current_row(assert(state))) end
   local focus = function(offset, insert)
     fields.focus(state, row() + offset, insert)
   end
@@ -109,7 +124,8 @@ local function install_keymaps(buf)
   map('n', '0', function() fields.focus_start(state) end)
   map('n', '^', function() fields.focus_start(state) end)
   map('n', 'I', function()
-    fields.set_cursor(state, row(), state.value_col)
+    local current = assert(state)
+    fields.set_cursor(current, row(), current.value_col)
     vim.cmd('startinsert')
   end)
   map('i', '<CR>', function()
@@ -119,14 +135,15 @@ local function install_keymaps(buf)
   map('i', '<Tab>', function() focus(1, true) end)
   map('i', '<S-Tab>', function() focus(-1, true) end)
   map('i', '<BS>', function()
-    return vim.api.nvim_win_get_cursor(state.win)[2] <= state.value_col
+    local current = assert(state)
+    return vim.api.nvim_win_get_cursor(current.win)[2] <= current.value_col
       and ''
       or '<BS>'
   end, { expr = true })
   map('i', '<Del>', function()
     local current_row = row()
     local line = vim.api.nvim_buf_get_lines(buf, current_row - 1, current_row, false)[1] or ''
-    return vim.api.nvim_win_get_cursor(state.win)[2] >= #line
+    return vim.api.nvim_win_get_cursor(assert(state).win)[2] >= #line
       and ''
       or '<Del>'
   end, { expr = true })
@@ -156,7 +173,7 @@ end
 --- 打开某键的多语言编辑浮窗
 ---@param plugin table vv-i18n 主模块
 ---@param full_key string
----@param opts? { on_saved?: fun(changed: integer), focus_lang?: string, target_win?: integer }
+---@param opts? { on_saved?: fun(changed: integer), on_jump?: fun(entry: table), focus_lang?: string, target_win?: integer }
 function M.open(plugin, full_key, opts)
   opts = opts or {}
   if state and state.win and vim.api.nvim_win_is_valid(state.win) and not request_close() then return end
@@ -208,6 +225,7 @@ function M.open(plugin, full_key, opts)
     last_lines = vim.deepcopy(edit_lines),
     target_win = target_win,
     on_saved = opts.on_saved,
+    on_jump = opts.on_jump,
     plugin = plugin,
   }
 

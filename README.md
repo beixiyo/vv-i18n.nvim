@@ -175,10 +175,25 @@ require('vv-i18n').setup({
     -- hl, missing_hl, lang, and missing_icon may also be overridden
     render = nil,                      -- Fully custom rendering function
   },
+  panel = {
+    width = 56,
+    position = 'right',
+    state = nil,                       -- Defaults to the shared vv-i18n/keys state
+    mappings = nil,                    -- nil=defaults, false=none, table=replace
+    on_attach = nil,
+    help = nil,
+    render = nil,                      -- Custom winbar/header/node/empty/footer renderers
+  },
+  references = {
+    enable = true,
+    icon = '󰗊 ',
+    hl = 'Comment',
+    jump_single = false,               -- Jump directly when exactly one reference exists
+    show_zero = false,                 -- Show "0 references" virtual text
+    panel = { width = 62, position = 'right', preview_debounce_ms = 80 },
+  },
 })
 ```
-
-Preview mode uses **in-place concealment**. It hides the string inside `t('key')` and inserts the icon and translation inline. Its width follows the translated value and reflows surrounding code. Moving the cursor onto that `t()` restores the source token, independently for multiple calls on one line. Missing keys display `⚠ key`. Matching windows temporarily receive `conceallevel=2` and `concealcursor`, and their original values are restored when preview is disabled.
 
 ### Custom `display.render`
 
@@ -238,6 +253,7 @@ Return `{ leaves = VVI18nLeaf[], top_keys? }`, where each leaf is `{ path=string
 |---------|--------|
 | `:VVI18nKeys` | Browse keys, inspect completeness, and synchronize values |
 | `:VVI18nMissing` | Show only missing keys, grouped by missing language |
+| `:VVI18nReferences` | Open a foldable reference sidebar for the key under the cursor |
 | `:VVI18nEdit` | Edit all language values for the key under the cursor |
 | `:VVI18nInfo` | Show every translation for the key under the cursor |
 | `:VVI18nJump` | Jump to a locale definition |
