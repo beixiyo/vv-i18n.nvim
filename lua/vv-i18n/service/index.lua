@@ -34,18 +34,22 @@ end
 local function source_dirs(source, project_root)
   local root = source.root and abspath(source.root, project_root) or project_root
   local dirs = {}
+
   if type(source.discover) == 'table' then
     vim.list_extend(dirs, Index.discover_by_patterns(root, source.discover))
   elseif type(source.discover) == 'function' then
     vim.list_extend(dirs, source.discover(root) or {})
   end
+
   for _, dir in ipairs(source.dirs or {}) do dirs[#dirs + 1] = abspath(dir, root) end
+
   return dirs
 end
 
 function M.reload(state, plugin)
-  local project, project_dir = Project.load(state.config)
-  state.config = project and Config.activate(project) or Config.activate(Config.base())
+  local project, project_dir = Project.load(state.base_config)
+
+  state.config = project and Config.activate(project) or Config.activate(state.base_config)
   state.project_file = project and project_dir or nil
   state.root = state.config.root or project_dir or Project.find_root()
   state.indexes = {}
@@ -77,8 +81,10 @@ function M.reload(state, plugin)
 
   if state.config.references.enable then
     require('vv-i18n.references.index').refresh(plugin)
+    state.references_dirty = false
   else
     require('vv-i18n.references.index').clear()
+    state.references_dirty = true
   end
   return state.indexes
 end

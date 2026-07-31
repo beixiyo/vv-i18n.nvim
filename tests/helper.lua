@@ -75,6 +75,7 @@ function H.checker()
   end
   local function done()
     print(('== %d PASS / %d FAIL =='):format(pass, fail))
+    if fail > 0 then vim.cmd('cquit! 1') end
     return pass, fail
   end
   return check, done

@@ -9,6 +9,87 @@ local display = require('vv-i18n.display')
 local check, done = H.checker()
 
 --------------------------------------------------------------------------------
+-- 连续 setup 的 scheduled 生命周期
+--------------------------------------------------------------------------------
+local enabled_config = vim.tbl_deep_extend('force', H.ns_config(), {
+  display = { enable = true },
+})
+i18n.setup(enabled_config)
+i18n.setup(H.ns_config())
+vim.wait(50)
+
+check('旧 setup 的 scheduled enable 不穿透 display.enable=false', not display.is_enabled())
+
+--------------------------------------------------------------------------------
+-- setup A→B 必须重建 production index
+--------------------------------------------------------------------------------
+i18n.setup(H.ns_config())
+i18n.reload()
+check('A 配置索引已建立', i18n.lookup('app.hero.title') ~= nil)
+
+i18n.setup(H.file_ns_config())
+check('B setup 后 lookup 立即使用 B 索引', i18n.lookup('common.ok') ~= nil)
+check('B setup 后旧 A 索引已失效', i18n.lookup('app.hero.title') == nil)
+
+--------------------------------------------------------------------------------
+-- project config 生效时，fallback display 重配不得重建索引
+--------------------------------------------------------------------------------
+local project_root = vim.fn.tempname()
+vim.fn.mkdir(vim.fs.joinpath(project_root, 'locales'), 'p')
+vim.fn.mkdir(vim.fs.joinpath(project_root, 'src'), 'p')
+vim.fn.writefile({
+  "export default { greeting: { hello: 'Hello' } }",
+}, vim.fs.joinpath(project_root, 'locales', 'en-US.ts'))
+vim.fn.writefile({
+  "const value = t('greeting.hello')",
+}, vim.fs.joinpath(project_root, 'src', 'App.ts'))
+vim.fn.writefile({
+  'return {',
+  "  root = " .. string.format('%q', project_root) .. ',',
+  '  sources = { {',
+  "    discover = function(root)",
+  "      _G.VV_I18N_PROJECT_DISCOVER = (_G.VV_I18N_PROJECT_DISCOVER or 0) + 1",
+  "      return { root .. '/locales' }",
+  "    end,",
+  "    mount = 'flat', namespace = 'flat', lang = '{lang}.ts',",
+  '  } },',
+  '  display = { enable = false },',
+  '}',
+}, vim.fs.joinpath(project_root, '.vv-i18n.lua'))
+local project_buf = vim.fn.bufadd(vim.fs.joinpath(project_root, 'src', 'App.ts'))
+vim.fn.bufload(project_buf)
+vim.api.nvim_set_current_buf(project_buf)
+
+local original_secure_read = vim.secure.read
+vim.secure.read = function(path)
+  return table.concat(vim.fn.readfile(path), '\n')
+end
+_G.VV_I18N_PROJECT_DISCOVER = 0
+i18n.setup(H.ns_config())
+_G.VV_I18N_PROJECT_DISCOVER = 0
+i18n.reload()
+check('trusted project fixture 使用项目配置建立索引',
+  i18n.lookup('greeting.hello') ~= nil and _G.VV_I18N_PROJECT_DISCOVER == 1,
+  vim.inspect({ count = _G.VV_I18N_PROJECT_DISCOVER, value = i18n.lookup('greeting.hello') }))
+
+local display_only = H.ns_config()
+display_only.display.max_width = 73
+i18n.setup(display_only)
+vim.wait(50)
+check('active project 下 display-only fallback setup 不重建索引',
+  _G.VV_I18N_PROJECT_DISCOVER == 1, _G.VV_I18N_PROJECT_DISCOVER)
+
+local disable_project = H.ns_config()
+disable_project.project_config = false
+i18n.setup(disable_project)
+vim.wait(50)
+check('影响项目选择的 setup 会失效并重建 fallback 索引',
+  i18n.lookup('app.hero.title') ~= nil and i18n.lookup('greeting.hello') == nil)
+vim.secure.read = original_secure_read
+_G.VV_I18N_PROJECT_DISCOVER = nil
+vim.fn.delete(project_root, 'rf')
+
+--------------------------------------------------------------------------------
 -- 单源（top-key 布局）
 --------------------------------------------------------------------------------
 i18n.setup(H.ns_config())

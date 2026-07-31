@@ -38,6 +38,17 @@ local function register_commands(state, plugin)
   command('VVI18nToggle', function() plugin.toggle() end, { desc = 'vv-i18n: 切换行内预览' })
 end
 
+local function enable_references(state, plugin)
+  require('vv-i18n.references.display').enable(plugin, state.config.references)
+  vim.api.nvim_create_autocmd('BufWritePost', {
+    group = vim.api.nvim_create_augroup('VVI18nReferencesIndex', { clear = true }),
+    pattern = { '*.ts', '*.tsx', '*.js', '*.jsx' },
+    callback = function(event)
+      require('vv-i18n.references.index').update_file(plugin, vim.api.nvim_buf_get_name(event.buf))
+    end,
+  })
+end
+
 function M.reload(state, plugin)
   local indexes = Index.reload(state, plugin)
   apply_display_hl(state)
@@ -45,10 +56,20 @@ function M.reload(state, plugin)
 end
 
 function M.setup(state, plugin, opts)
+  state.setup_epoch = state.setup_epoch + 1
+  local epoch = state.setup_epoch
+
   require('vv-i18n.references.display').disable()
   require('vv-i18n.display').disable()
+
   pcall(vim.api.nvim_del_augroup_by_name, 'VVI18nReferencesIndex')
+
   Runtime.set_config(state, Config.setup(opts or {}))
+
+  if not state.config.references.enable then
+    require('vv-i18n.references.index').clear()
+    state.references_dirty = true
+  end
   apply_display_hl(state)
 
   vim.api.nvim_create_autocmd('ColorScheme', {
@@ -62,17 +83,30 @@ function M.setup(state, plugin, opts)
   register_commands(state, plugin)
 
   if state.config.references.enable then
-    require('vv-i18n.references.display').enable(plugin, state.config.references)
-    vim.api.nvim_create_autocmd('BufWritePost', {
-      group = vim.api.nvim_create_augroup('VVI18nReferencesIndex', { clear = true }),
-      pattern = { '*.ts', '*.tsx', '*.js', '*.jsx' },
-      callback = function(event)
-        require('vv-i18n.references.index').update_file(plugin, vim.api.nvim_buf_get_name(event.buf))
-      end,
-    })
+    enable_references(state, plugin)
   end
-  vim.schedule(function() Index.ensure(state, plugin) end)
-  if state.config.display.enable then vim.schedule(function() pcall(plugin.enable) end) end
+  vim.schedule(function()
+    if state.setup_epoch ~= epoch then return end
+
+    local had_indexes = state.indexes ~= nil
+    Index.ensure(state, plugin)
+    if state.setup_epoch ~= epoch then return end
+
+    apply_display_hl(state)
+    if state.config.references.enable then
+      enable_references(state, plugin)
+      if had_indexes and state.references_dirty then
+        require('vv-i18n.references.index').refresh(plugin)
+        state.references_dirty = false
+      end
+    else
+      require('vv-i18n.references.display').disable()
+      pcall(vim.api.nvim_del_augroup_by_name, 'VVI18nReferencesIndex')
+      require('vv-i18n.references.index').clear()
+      state.references_dirty = true
+    end
+    if state.config.display.enable then pcall(plugin.enable) end
+  end)
 end
 
 return M

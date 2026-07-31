@@ -38,6 +38,46 @@ local has_index_listener = pcall(vim.api.nvim_get_autocmds, { group = 'VVI18nRef
 check('references=false 不注册 index listener 且 display 已释放', not has_index_listener
   and not ReferenceDisplay.is_enabled())
 
+local transition_root = vim.fn.tempname()
+vim.fn.mkdir(vim.fs.joinpath(transition_root, 'locales'), 'p')
+vim.fn.mkdir(vim.fs.joinpath(transition_root, 'src'), 'p')
+vim.fn.writefile({
+  "export default { greeting: { hello: 'Hello' } }",
+}, vim.fs.joinpath(transition_root, 'locales', 'en-US.ts'))
+local transition_source = vim.fs.joinpath(transition_root, 'src', 'App.ts')
+vim.fn.writefile({ "t('greeting.hello')" }, transition_source)
+local transition_config = {
+  root = transition_root,
+  sources = {
+    { discover = { 'locales' }, mount = 'flat', namespace = 'flat', lang = '{lang}.ts' },
+  },
+  display = { enable = false },
+  references = { enable = true },
+  project_config = false,
+}
+i18n.setup(transition_config)
+i18n.reload()
+check('references transition fixture 初始扫描完成',
+  vim.wait(3000, function() return not References.is_scanning() end))
+check('references=true 建立真实引用索引',
+  #References.get('greeting.hello') == 1, #References.get('greeting.hello'))
+
+local transition_disabled = vim.deepcopy(transition_config)
+transition_disabled.references.enable = false
+i18n.setup(transition_disabled)
+check('references=false 立即清空旧引用索引',
+  #References.get('greeting.hello') == 0, #References.get('greeting.hello'))
+vim.fn.writefile({
+  "t('greeting.hello')",
+  "t('greeting.hello')",
+}, transition_source)
+
+i18n.setup(transition_config)
+check('references false→true 会重新扫描禁用期变化', vim.wait(3000, function()
+  return not References.is_scanning() and #References.get('greeting.hello') == 2
+end), #References.get('greeting.hello'))
+vim.fn.delete(transition_root, 'rf')
+
 i18n.setup(config)
 i18n.reload()
 
