@@ -59,7 +59,7 @@ verify_failure_gate() {
 
 for spec in "$DIR"/writer_spec.lua "$DIR"/index_spec.lua "$DIR"/resolver_spec.lua \
             "$DIR"/init_spec.lua "$DIR"/integration_spec.lua "$DIR"/panel_model_spec.lua \
-            "$DIR"/panel_spec.lua "$DIR"/references_spec.lua; do
+            "$DIR"/panel_spec.lua "$DIR"/references_spec.lua "$DIR"/references_async_spec.lua; do
   run_spec "$spec"
 done
 

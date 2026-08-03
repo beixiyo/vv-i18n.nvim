@@ -1,11 +1,11 @@
 -- 项目引用索引：先用 rg 筛出候选文件，再交给 vv-i18n 的 tree-sitter resolver 精确解析
 
 local fs = require('vv-utils.fs')
+local scan_scope = require('vv-utils.async').scope({ cancel_previous = true })
 
 local M = {}
 
 local state = {
-  generation = 0,
   scanning = false,
   by_key = {},
   by_file = {},
@@ -36,15 +36,27 @@ local function remove_file(path)
   state.by_file[path] = nil
 end
 
-local function index_file(plugin, path, root)
-  remove_file(path)
+---@param request? vv-utils.async.Request
+---@return boolean current
+local function index_file(plugin, path, root, request)
+  local function is_current()
+    return not request or request:is_current()
+  end
 
   local ok, content = pcall(fs.read_all, path)
-  if not ok or type(content) ~= 'string' then return end
+
+  if not is_current() then return false end
+  if not ok or type(content) ~= 'string' then return true end
 
   local lines = vim.split(content, '\n', { plain = true })
   local refs = {}
-  for _, result in ipairs(plugin.collect_content(content, path)) do
+  local results = plugin.collect_content(content, path)
+
+  if not is_current() then return false end
+
+  for _, result in ipairs(results) do
+    if not is_current() then return false end
+
     if result.kind == 'hit' then
       local ref = {
         full_key = result.full_key,
@@ -56,30 +68,51 @@ local function index_file(plugin, path, root)
         line = vim.trim(lines[result.range.srow + 1] or ''),
       }
       refs[#refs + 1] = ref
-      state.by_key[ref.full_key] = state.by_key[ref.full_key] or {}
-      state.by_key[ref.full_key][#state.by_key[ref.full_key] + 1] = ref
     end
   end
+
+  if not is_current() then return false end
+  remove_file(path)
+
+  for _, ref in ipairs(refs) do
+    state.by_key[ref.full_key] = state.by_key[ref.full_key] or {}
+    state.by_key[ref.full_key][#state.by_key[ref.full_key] + 1] = ref
+  end
+
   state.by_file[path] = refs
+
+  return true
 end
 
 ---@param plugin table
 ---@param callback? fun()
 function M.refresh(plugin, callback)
+  local request = scan_scope:begin()
   local root = plugin.get_state().root
-  if not root then return end
 
-  state.generation = state.generation + 1
-  local generation = state.generation
+  if not request:is_current() then return end
+  if not root then
+    state.scanning = false
+    emit()
+    if not request:is_current() then return end
+    request:finish()
+    if callback then callback() end
+    return
+  end
+
   state.scanning = true
   state.by_key = {}
   state.by_file = {}
   emit()
+  if not request:is_current() then return end
 
   local names = plugin.reference_names()
+  if not request:is_current() then return end
   if #names == 0 then
     state.scanning = false
     emit()
+    if not request:is_current() then return end
+    request:finish()
     if callback then callback() end
     return
   end
@@ -101,25 +134,35 @@ function M.refresh(plugin, callback)
   }
 
   if vim.fn.executable('rg') ~= 1 then
+    if not request:is_current() then return end
     state.scanning = false
     emit()
+
+    if not request:is_current() then return end
+    request:finish()
+
     if callback then callback() end
     return
   end
 
-  vim.system(command, { cwd = root, text = true }, function(result)
+  local process = assert(vim.system(command, { cwd = root, text = true }, function(result)
     vim.schedule(function()
-      if generation ~= state.generation then return end
+      if not request:is_current() then return end
 
       local files = result.code == 0 and vim.split(result.stdout or '', '\n', { trimempty = true }) or {}
       local index = 1
 
       local function batch()
-        if generation ~= state.generation then return end
+        if not request:is_current() then return end
 
         local last = math.min(index + 19, #files)
         for current = index, last do
-          index_file(plugin, root .. '/' .. files[current]:gsub('^%./', ''), root)
+          if not index_file(
+            plugin,
+            root .. '/' .. files[current]:gsub('^%./', ''),
+            root,
+            request
+          ) then return end
         end
         index = last + 1
 
@@ -140,11 +183,17 @@ function M.refresh(plugin, callback)
 
         state.scanning = false
         emit()
+        if not request:is_current() then return end
+        request:finish()
         if callback then callback() end
       end
 
       batch()
     end)
+  end))
+
+  request:set_cancel(function()
+    pcall(process.kill, process, 'sigterm')
   end)
 end
 
@@ -180,7 +229,7 @@ function M.is_scanning()
 end
 
 function M.clear()
-  state.generation = state.generation + 1
+  scan_scope:cancel()
   state.scanning = false
   state.by_key = {}
   state.by_file = {}
