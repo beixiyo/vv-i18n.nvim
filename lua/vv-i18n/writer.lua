@@ -12,7 +12,6 @@ local M = {}
 
 local byte_range = ast.byte_range
 local node_text = ast.node_text
-local strip_quotes = ast.strip_quotes
 local render_key = ast.render_key
 local encode = ast.encode_string
 local find_root_object = ast.find_root_object
@@ -82,14 +81,16 @@ end
 --------------------------------------------------------------------------------
 
 --- 为 remaining 路径构建插入片段（最后一段是叶子值）。indent=当前缩进，unit=缩进步进
-local function build_snippet(remaining, value, indent, quote, unit)
+local function build_snippet(remaining, value, indent, quote, unit, lang)
   if #remaining == 1 then
-    return render_key(remaining[1]) .. ': ' .. encode(value, quote)
+    local key = lang == 'json' and encode(remaining[1], '"') or render_key(remaining[1])
+    return key .. ': ' .. encode(value, quote)
   end
   local head = remaining[1]
   local rest = { unpack(remaining, 2) }
-  local inner = build_snippet(rest, value, indent .. unit, quote, unit)
-  return render_key(head) .. ': {\n' .. indent .. unit .. inner .. '\n' .. indent .. '}'
+  local inner = build_snippet(rest, value, indent .. unit, quote, unit, lang)
+  local key = lang == 'json' and encode(head, '"') or render_key(head)
+  return key .. ': {\n' .. indent .. unit .. inner .. '\n' .. indent .. '}'
 end
 
 --- 推断目标文件既有的引号风格（取第一处 string 字面量），默认单引号
@@ -142,7 +143,8 @@ local function infer_indent_unit(obj, content)
 end
 
 --- 据 quote_style 决定引号：single/double 直给，auto/nil 推断
-local function resolve_quote(obj, content, quote_style)
+local function resolve_quote(obj, content, quote_style, lang)
+  if lang == 'json' then return '"' end
   if quote_style == 'single' then return "'" end
   if quote_style == 'double' then return '"' end
   return infer_quote(obj, content)
@@ -160,7 +162,7 @@ function M.add_in_content(content, key_path, value, lang, opts)
   local obj, err = find_root_object(content, lang)
   if not obj then return { ok = false, reason = err } end
 
-  local quote = resolve_quote(obj, content, opts.quote_style)
+  local quote = resolve_quote(obj, content, opts.quote_style, lang)
   local unit = opts.indent or infer_indent_unit(obj, content)
 
   -- 沿已有对象层下钻
@@ -193,7 +195,7 @@ function M.add_in_content(content, key_path, value, lang, opts)
     local osb = select(1, byte_range(cur))
     local obj_indent = indent_of(content, osb)
     local inner_indent = obj_indent .. unit
-    local snippet = build_snippet(remaining, value, inner_indent, quote, unit)
+    local snippet = build_snippet(remaining, value, inner_indent, quote, unit, lang)
     -- cur 节点文本以 '{' 开头，osb 为 '{' 的 0-based 起点 → '{' 是 1-based 第 osb+1 个字符
     new_content = content:sub(1, osb + 1)
       .. '\n' .. inner_indent .. snippet .. '\n' .. obj_indent
@@ -202,7 +204,7 @@ function M.add_in_content(content, key_path, value, lang, opts)
     local last_pair = pairs_in[#pairs_in]
     local lsb, leb = byte_range(last_pair)
     local indent = indent_of(content, lsb)
-    local snippet = build_snippet(remaining, value, indent, quote, unit)
+    local snippet = build_snippet(remaining, value, indent, quote, unit, lang)
 
     local tail = content:sub(leb + 1)
     local lead_comma = tail:match('^%s*,')
@@ -227,36 +229,144 @@ function M.add_in_content(content, key_path, value, lang, opts)
 end
 
 --------------------------------------------------------------------------------
+-- 删除键
+--------------------------------------------------------------------------------
+
+--- 从 content 中删除指定 pair。只删除目标 pair 和它对应的逗号，保留目标前后
+--- 的空白与注释；即使父对象因此变空，也不会递归删除父对象。
+---
+--- 逗号是 object 的匿名 tree-sitter 子节点，不通过字符串搜索猜测位置，避免
+--- 把值字符串、注释或嵌套对象中的逗号误删。
+---@param content string
+---@param key_path string[] 逐层 key（如 { 'hero', 'title' }）
+---@param lang? string 默认 'typescript'
+---@param opts? table 为未来删除策略保留的选项；当前不递归清空父对象
+---@return { ok: boolean, content?: string, reason?: string }
+function M.delete_in_content(content, key_path, lang, opts)
+  lang = lang or 'typescript'
+  opts = opts or {}
+  if type(key_path) ~= 'table' or #key_path == 0 then
+    return { ok = false, reason = 'invalid-key-path' }
+  end
+
+  local obj, err = find_root_object(content, lang)
+  if not obj then return { ok = false, reason = err } end
+
+  local cur = obj
+  for i = 1, #key_path - 1 do
+    local pair = find_pair(cur, key_path[i], content)
+    if not pair then return { ok = false, reason = 'path-missing:' .. key_path[i] } end
+    local v = pair:field('value')[1]
+    if not v or v:type() ~= 'object' then
+      return { ok = false, reason = 'not-object:' .. key_path[i] }
+    end
+    cur = v
+  end
+
+  local target = find_pair(cur, key_path[#key_path], content)
+  if not target then return { ok = false, reason = 'key-not-found' } end
+
+  local target_start, target_end = byte_range(target)
+  local children = {}
+  for child in cur:iter_children() do
+    children[#children + 1] = child
+  end
+
+  local target_index
+  for i, child in ipairs(children) do
+    if child:type() == 'pair' then
+      local child_start, child_end = byte_range(child)
+      if child_start == target_start and child_end == target_end then
+        target_index = i
+        break
+      end
+    end
+  end
+  if not target_index then return { ok = false, reason = 'pair-not-found' } end
+
+  -- 优先使用 pair 后面的逗号；对于最后一个 pair，使用它前面的逗号
+  -- pair 节点之间的注释和空白不会被纳入任一删除范围
+  -- 因此相邻注释可以保留
+  local comma
+  for i = target_index + 1, #children do
+    local child_type = children[i]:type()
+    if child_type == 'pair' then break end
+    if child_type == ',' then
+      comma = children[i]
+      break
+    end
+  end
+  if not comma then
+    for i = target_index - 1, 1, -1 do
+      local child_type = children[i]:type()
+      if child_type == 'pair' then break end
+      if child_type == ',' then
+        comma = children[i]
+        break
+      end
+    end
+  end
+
+  local edits = { { target_start, target_end } }
+  if comma then
+    local comma_start, comma_end = byte_range(comma)
+    edits[#edits + 1] = { comma_start, comma_end }
+  end
+
+  table.sort(edits, function(a, b) return a[1] > b[1] end)
+  local new_content = content
+  for _, edit in ipairs(edits) do
+    new_content = new_content:sub(1, edit[1]) .. new_content:sub(edit[2] + 1)
+  end
+
+  if not validate(new_content, lang) then
+    return { ok = false, reason = 'reparse-error' }
+  end
+  return { ok = true, content = new_content }
+end
+
+--------------------------------------------------------------------------------
 -- 文件 / buffer 封装
 --------------------------------------------------------------------------------
 
 local lang_for = ast.lang_for_path
 
+local function run_file_operation(path, opts, transform)
+  opts = opts or {}
+  local read_ok, content = pcall(fs.read_all, path)
+  if not read_ok or not content then return { ok = false, reason = 'read-failed' } end
+
+  local result = transform(content, lang_for(path), opts)
+  if result.ok and not opts.dry_run then
+    local write_ok, write_error = pcall(fs.write_all, path, result.content)
+    if not write_ok then return { ok = false, reason = 'write-failed:' .. tostring(write_error) } end
+  end
+  return result
+end
+
 --- 改文件里某 key 的值；dry_run=true 只返回新内容不落盘
 function M.update_file(path, key_path, new_value, opts)
-  opts = opts or {}
-  local rok, content = pcall(fs.read_all, path)
-  if not rok or not content then return { ok = false, reason = 'read-failed' } end
-  local r = M.update_in_content(content, key_path, new_value, lang_for(path))
-  if r.ok and not opts.dry_run then
-    local wok, werr = pcall(fs.write_all, path, r.content)
-    if not wok then return { ok = false, reason = 'write-failed:' .. tostring(werr) } end
-  end
-  return r
+  return run_file_operation(path, opts, function(content, lang)
+    return M.update_in_content(content, key_path, new_value, lang)
+  end)
 end
 
 --- 给文件新增 key；dry_run=true 只返回新内容不落盘；quote_style/indent 控制风格（默认 auto）
 function M.add_file(path, key_path, value, opts)
-  opts = opts or {}
-  local rok, content = pcall(fs.read_all, path)
-  if not rok or not content then return { ok = false, reason = 'read-failed' } end
-  local r = M.add_in_content(content, key_path, value, lang_for(path),
-    { quote_style = opts.quote_style, indent = opts.indent })
-  if r.ok and not opts.dry_run then
-    local wok, werr = pcall(fs.write_all, path, r.content)
-    if not wok then return { ok = false, reason = 'write-failed:' .. tostring(werr) } end
-  end
-  return r
+  return run_file_operation(path, opts, function(content, lang, normalized_opts)
+    return M.add_in_content(content, key_path, value, lang, {
+      quote_style = normalized_opts.quote_style,
+      indent = normalized_opts.indent,
+    })
+  end)
+end
+
+--- 删除文件里某 key；dry_run=true 只返回新内容不落盘。
+--- 默认不递归清空删除后变空的父对象。
+function M.delete_file(path, key_path, opts)
+  return run_file_operation(path, opts, function(content, lang, normalized_opts)
+    return M.delete_in_content(content, key_path, lang, normalized_opts)
+  end)
 end
 
 return M

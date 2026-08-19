@@ -92,5 +92,95 @@ end
 local r10 = W.add_in_content(nc, { 'c' }, '3', nil, { quote_style = 'double' })
 check('⑩ quote_style=double 覆盖', r10.ok and r10.content:find('c: "3"', 1, true) ~= nil, r10.reason)
 
+-- T11 删除唯一 pair：保留父对象，不递归清空
+local unique = "export const x = {\n  // 保留这个注释\n  only: '1',\n} as const\n"
+local r11 = W.delete_in_content(unique, { 'only' })
+check('⑪ 删除唯一键 ok', r11.ok, r11.reason)
+if r11.ok then
+  check('⑪ 唯一键消失', r11.content:find('only:', 1, true) == nil)
+  check('⑪ 父对象保留', r11.content:find('export const x = {', 1, true) ~= nil)
+  check('⑪ 邻居注释保留', r11.content:find('// 保留这个注释', 1, true) ~= nil)
+end
+
+-- T12 首 / 中 / 尾 pair：按 tree-sitter 逗号节点删除，注释和兄弟键均保全
+local positioned = [[export const x = {
+  // first
+  first: '1',
+  // middle
+  middle: '2',
+  // last
+  last: '3',
+} as const
+]]
+local r12a = W.delete_in_content(positioned, { 'first' })
+check('⑫ 删除首键 ok', r12a.ok, r12a.reason)
+if r12a.ok then
+  check('⑫ 首键消失且中键仍在', r12a.content:find('first:', 1, true) == nil
+    and r12a.content:find("middle: '2'", 1, true) ~= nil)
+  check('⑫ 首键邻居注释保留', r12a.content:find('// first', 1, true) ~= nil
+    and r12a.content:find('// middle', 1, true) ~= nil)
+end
+local r12b = W.delete_in_content(positioned, { 'middle' })
+check('⑫ 删除中键 ok', r12b.ok, r12b.reason)
+if r12b.ok then
+  check('⑫ 中键消失且两侧仍在', r12b.content:find('middle:', 1, true) == nil
+    and r12b.content:find("first: '1'", 1, true) ~= nil
+    and r12b.content:find("last: '3'", 1, true) ~= nil)
+  check('⑫ 中键邻居注释保留', r12b.content:find('// middle', 1, true) ~= nil)
+end
+local r12c = W.delete_in_content(positioned, { 'last' })
+check('⑫ 删除尾键 ok', r12c.ok, r12c.reason)
+if r12c.ok then
+  check('⑫ 尾键消失且前键仍在', r12c.content:find('last:', 1, true) == nil
+    and r12c.content:find("middle: '2'", 1, true) ~= nil)
+  check('⑫ 尾键邻居注释保留', r12c.content:find('// last', 1, true) ~= nil)
+end
+
+-- T13 嵌套删除：只删叶子，不删除变空的中间对象
+local nested = "export const x = {\n  parent: {\n    child: '1',\n  },\n} as const\n"
+local r13 = W.delete_in_content(nested, { 'parent', 'child' })
+check('⑬ 嵌套键删除 ok', r13.ok, r13.reason)
+if r13.ok then
+  check('⑬ 叶子消失', r13.content:find('child:', 1, true) == nil)
+  check('⑬ 空父对象保留且可解析', r13.content:find('parent: {', 1, true) ~= nil)
+end
+
+-- T14 无尾逗号的唯一 pair / 中间 pair
+local no_trailing = "export const x = {\n  first: '1',\n  middle: '2',\n  last: '3'\n} as const\n"
+local r14 = W.delete_in_content(no_trailing, { 'middle' })
+check('⑭ 无尾逗号删除中键 ok', r14.ok, r14.reason)
+if r14.ok then
+  check('⑭ 无尾逗号兄弟保全', r14.content:find("first: '1'", 1, true) ~= nil
+    and r14.content:find("last: '3'", 1, true) ~= nil
+    and r14.content:find('middle:', 1, true) == nil)
+end
+
+-- T15 文件封装 dry-run：不落盘；随后真实删除验证写回
+local delete_file_path = vim.fn.tempname() .. '.ts'
+vim.fn.writefile(vim.split(positioned, '\n', { plain = true }), delete_file_path)
+local before_delete_file = H.read(delete_file_path)
+local r15a = W.delete_file(delete_file_path, { 'middle' }, { dry_run = true })
+check('⑮ delete_file dry-run ok', r15a.ok, r15a.reason)
+check('⑮ dry-run 未落盘', H.read(delete_file_path) == before_delete_file)
+local r15b = W.delete_file(delete_file_path, { 'middle' })
+check('⑮ delete_file 写回 ok', r15b.ok, r15b.reason)
+check('⑮ 写回后目标消失', H.read(delete_file_path):find('middle:', 1, true) == nil)
+vim.fn.delete(delete_file_path)
+
+-- T16 add_file 必须真实落盘，而不是只验证内存转换
+local add_file_path = vim.fn.tempname() .. '.json'
+vim.fn.writefile({ '{', '  "keep": "Keep"', '}' }, add_file_path)
+local r16 = W.add_file(add_file_path, { 'newKey' }, 'New value')
+check('⑯ add_file 写回 ok', r16.ok, r16.reason)
+check('⑯ 写回 JSON 保留旧值并新增 key', H.read(add_file_path):find('"keep": "Keep"', 1, true) ~= nil
+  and H.read(add_file_path):find('"newKey": "New value"', 1, true) ~= nil)
+vim.fn.delete(add_file_path)
+
+-- T17 无法解析和不存在路径都拒绝写回
+local r17a = W.delete_in_content('export const x = {', { 'x' })
+check('⑰ 语法错误拒绝删除', (not r17a.ok) and r17a.reason == 'source-has-error', r17a.reason)
+local r17b = W.delete_in_content(unique, { 'missing' })
+check('⑰ 不存在键拒绝删除', (not r17b.ok) and r17b.reason == 'key-not-found', r17b.reason)
+
 done()
 vim.cmd('qa!')

@@ -145,39 +145,46 @@ sources = {
 > `prefix` 只写在 source 上，索引侧与调用侧共用（单一真相）。`mount` 与 `namespace` 须配成对
 > （上方每行都成对）
 
-## 全部配置
+## 完整配置参考
 
 ```lua
 require('vv-i18n').setup({
-  root = nil,                          -- nil = 自动探测
-
-  -- 全局默认（每个 source 可覆盖同名字段）
+  root = nil,                          -- nil：自动探测项目根
+  sources = {
+    {
+      prefix = '',
+      root = nil,                      -- 相对项目根，或绝对路径
+      discover = nil,                  -- glob 数组或 function(root) -> 目录列表
+      dirs = nil,                      -- 显式目录，与 discover 合并
+      lang = nil,                      -- 覆盖全局 lang
+      mount = nil,                     -- 覆盖全局 mount
+      namespace = nil,                 -- 覆盖全局 namespace
+      hooks = nil,                     -- 覆盖全局 hooks
+      t = nil,                         -- 覆盖全局翻译函数名
+      parse = nil,                     -- 覆盖全局读侧解析器
+    },
+  },
   hooks = { 'useTranslation' },
   t = { 't' },
-  lang = { '{lang}.ts', '{lang}.json' },
+  lang = { '{lang}.ts', '{lang}.tsx', '{lang}.js', '{lang}.json' },
   mount = 'top-key',
   namespace = 'hook-arg',
-
-  sources = { --[[ 见上 ]] },
-
-  -- 高级
-  namespace_separator = ':',           -- 绝对命名空间 ns<sep>key；'' 关闭
+  namespace_separator = ':',
   key_separator = '.',
-  quote_style = 'auto',                -- 写回引号 single|double|auto
-  indent = nil,                        -- 写回缩进，nil=推断
-  project_config = true,               -- 探测项目根 .vv-i18n.lua（见下）
-  parse = nil,                         -- 自定义读侧解析（非 JS/JSON 格式，见下）
-
+  quote_style = 'auto',                -- 'single' | 'double' | 'auto'
+  indent = nil,                        -- nil：从目标文件推断
   display = {
     enable = true,
-    preferred_langs = {},              -- 预览首选语言（空=字典序首个）
+    lang = nil,
+    preferred_langs = {},              -- 空时选择字典序首个语言
     max_width = 40,
-    icon = '󰗊 ',                       -- 译文前缀图标
-    -- 样式：style 直接定义 { fg=, bg=, italic=, bold= }；不给则默认 注释色 + 斜体（随主题）
-    style = nil,                       -- 译文样式（覆盖 hl）
-    missing_style = nil,               -- 缺失样式
-    -- 也可只换高亮组：hl / missing_hl；或 lang（固定预览语言）/ missing_icon
-    render = nil,                      -- 函数完全自定义渲染（见下）
+    icon = '󰗊 ',
+    missing_icon = '⚠ ',
+    hl = 'VVI18nPreview',
+    missing_hl = 'VVI18nMissing',
+    style = nil,                       -- 覆盖 hl 的高亮属性
+    missing_style = nil,
+    render = nil,                      -- function(ctx) -> 字符串 | 虚拟文本片段 | nil
   },
   panel = {
     width = 56,
@@ -193,22 +200,52 @@ require('vv-i18n').setup({
     icon = '󰗊 ',
     hl = 'Comment',
     jump_single = false,               -- 只有一个引用时直接跳转
-    show_zero = false,                 -- 显示“0 references”虚拟文本
-    panel = { width = 62, position = 'right', preview_debounce_ms = 80 },
+    show_zero = false,                 -- 显示零引用虚拟文本
+    render = nil,                      -- 自定义定义处引用数
+    scanners = {},                     -- 新增或覆盖其他语言 scanner
+    panel = {
+      width = 62,
+      position = 'right',
+      preview_debounce_ms = 80,
+      state = nil,
+      mappings = nil,
+      on_attach = nil,
+      help = nil,
+      render = nil,                    -- 自定义引用节点
+    },
   },
+  unused = {
+    copy = {
+      definition_language = 'en',      -- 'all' 或指定语言；缺失时自动回退
+      include_values = false,
+      render = nil,                    -- function(ctx) -> Markdown 字符串
+    },
+    panel = {
+      width = 68,
+      position = 'right',
+      state = nil,
+      mappings = nil,
+      on_attach = nil,
+      help = nil,
+      render = nil,
+    },
+  },
+  ft = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
+  project_config = true,               -- 加载可信的 .vv-i18n.lua
+  parse = nil,                         -- 自定义读侧解析器
 })
 ```
 
-### 自定义渲染 `display.render`
+### 自定义 `display.render`
 
-收上下文、返回字符串或 virt_text chunks（`nil` 落默认）：
+渲染函数接收以下上下文，返回字符串、虚拟文本片段，或返回 `nil` 使用默认渲染：
 
 ```lua
 display = {
   render = function(ctx)
     -- ctx = { full_key, value, lang, kind, missing, per, literal, icon, hl, max_width }
     if ctx.missing then return { { '✗ ' .. ctx.literal, 'Error' } } end
-    return { { ctx.icon, 'Comment' }, { ctx.value, 'String' } }  -- 图标与译文分色
+    return { { ctx.icon, 'Comment' }, { ctx.value, 'String' } }
   end,
 }
 ```
@@ -262,6 +299,7 @@ end
 | `:VVI18nKeys`                      | 键浏览 / 完整度 / 同步编辑面板 |
 | `:VVI18nMissing`                   | 仅缺失 key，按缺失语言分组     |
 | `:VVI18nReferences`                | 打开当前 key 的可折叠引用侧栏  |
+| `:VVI18nUnused`                    | 潜在无用 key 核查/复制/删除面板 |
 | `:VVI18nEdit`                      | 光标处键的多语言同步编辑浮窗   |
 | `:VVI18nInfo`                      | 光标处键各语言译文             |
 | `:VVI18nJump`                      | 跳到 locale 定义               |
@@ -269,6 +307,35 @@ end
 | `:VVI18nAddKey`                    | 补缺失语言                     |
 | `:VVI18nReload`                    | 重建索引                       |
 | `:VVI18n[Enable\|Disable\|Toggle]` | 行内预览开关                   |
+
+### 潜在无用 key
+
+`:VVI18nUnused` 展示引用扫描没有命中的**候选**
+
+对于 ``t(`prefix.${value}`)`` 这类动态模板，扫描器只记录可静态证明的固定前缀和调用位置，
+不推导运行时值。被该前缀覆盖的 key 显示在 `Unknown` 分组
+
+### 扩展其他语言的引用 scanner
+
+内置 scanner 支持 `ts`、`tsx`、`js`、`jsx`。其他语言通过 adapter 接入：
+
+```lua
+references = {
+  scanners = {
+    {
+      id = 'python',
+      extensions = { 'py' },
+      names = { 'gettext', '_' },
+      collect = function(ctx)
+        return my_python_i18n_scanner(ctx.content, ctx.path)
+      end,
+    },
+  },
+}
+```
+
+`collect` 返回带 0-based `range` 的 `hit`、`dynamic`、`ambiguous` 或 `missing`；字段见
+[`VVI18nReferenceResult`](lua/vv-i18n/types.lua)
 
 ## 测试
 

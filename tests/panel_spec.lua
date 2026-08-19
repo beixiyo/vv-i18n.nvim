@@ -221,24 +221,26 @@ if missing_lnum then
   vim.api.nvim_exec_autocmds('CursorMoved', { buffer = edit_buf })
   check('光标不会落在语言标签上', vim.api.nvim_win_get_cursor(0)[2] > lang_width)
 
-  check('编辑器 normal <C-S> 映射存在', find_map(edit_buf, 'n', '<C-S>') ~= nil)
-  check('编辑器 insert <C-S> 映射存在', find_map(edit_buf, 'i', '<C-S>') ~= nil)
-  check('编辑器 <CR> 跳转映射存在', find_map(edit_buf, 'n', '<CR>') ~= nil)
-  check('编辑器 insert <CR> 跳转映射存在', find_map(edit_buf, 'i', '<CR>') ~= nil)
+  check('编辑器 normal <C-S> 映射可执行', type((find_map(edit_buf, 'n', '<C-S>') or {}).callback) == 'function')
+  check('编辑器 insert <C-S> 映射可执行', type((find_map(edit_buf, 'i', '<C-S>') or {}).callback) == 'function')
+  check('编辑器 <CR> 跳转映射可执行', type((find_map(edit_buf, 'n', '<CR>') or {}).callback) == 'function')
+  check('编辑器 insert <CR> 跳转映射可执行', type((find_map(edit_buf, 'i', '<CR>') or {}).callback) == 'function')
 
   vim.api.nvim_buf_set_lines(edit_buf, ja_lnum - 1, ja_lnum, false, {
     string.rep(' ', value_col) .. 'draft',
   })
   vim.api.nvim_exec_autocmds('TextChanged', { buffer = edit_buf })
   local jump_map = find_map(edit_buf, 'n', '<CR>')
-  if jump_map and jump_map.callback then jump_map.callback() end
+  assert(type(jump_map.callback) == 'function')
+  jump_map.callback()
   check('未保存修改会阻止跳转', vim.api.nvim_win_is_valid(edit_win)
     and vim.api.nvim_get_current_buf() == edit_buf)
 
   local close_map = find_map(edit_buf, 'n', 'q')
   local confirm = vim.fn.confirm
   vim.fn.confirm = function() return 2 end
-  if close_map and close_map.callback then close_map.callback() end
+  assert(type(close_map.callback) == 'function')
+  close_map.callback()
   vim.fn.confirm = confirm
   check('关闭确认选择 No 时保留编辑器', vim.api.nvim_win_is_valid(edit_win)
     and vim.api.nvim_get_current_buf() == edit_buf)
@@ -281,7 +283,8 @@ if missing_lnum then
   ))
 
   local save_map = find_map(edit_buf, 'n', '<C-S>')
-  if save_map and save_map.callback then save_map.callback() end
+  assert(type(save_map.callback) == 'function')
+  save_map.callback()
   check('编辑器保存后窗口保持打开', vim.api.nvim_get_current_buf() == edit_buf)
 
   local jump_lnum, jump_entry

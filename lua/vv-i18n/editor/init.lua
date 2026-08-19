@@ -5,12 +5,14 @@
 local fields = require('vv-i18n.editor.fields')
 local model = require('vv-i18n.editor.model')
 local navigation = require('vv-i18n.editor.navigation')
+local UIWindow = require('vv-utils.ui_window')
 
 local M = {}
 
 ---@class VVI18nEditorState
 ---@field buf integer
 ---@field win integer
+---@field close_window fun()
 ---@field full_key string
 ---@field rows table[]
 ---@field lang_width integer
@@ -25,9 +27,7 @@ local M = {}
 local state = nil
 
 local function close()
-  if state and state.win and vim.api.nvim_win_is_valid(state.win) then
-    vim.api.nvim_win_close(state.win, true)
-  end
+  if state and state.close_window then state.close_window() end
   state = nil
 end
 
@@ -199,25 +199,26 @@ function M.open(plugin, full_key, opts)
   width = math.max(60, math.min(width, vim.o.columns - 8))
   local height = math.max(#lines, 1)
   local target_win = opts.target_win or navigation.main_window()
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = 'editor',
+  local float = UIWindow.open_float(buf, {
     width = width,
     height = height,
-    row = math.floor((vim.o.lines - height) / 2) - 1,
-    col = math.floor((vim.o.columns - width) / 2),
-    style = 'minimal',
+    margin = 8,
     border = 'rounded',
     title = ' 󰗊 ' .. full_key .. ' ',
     title_pos = 'center',
     footer = ' Jump ↵ · Save ^s · Next ⇥ · Close q ',
     footer_pos = 'center',
+    chrome = {
+      winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder',
+      virtualedit = 'onemore',
+    },
   })
-  vim.wo[win].winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder'
-  vim.wo[win].virtualedit = 'onemore'
+  local win = float.win
 
   state = {
     buf = buf,
     win = win,
+    close_window = float.close,
     full_key = full_key,
     rows = rows,
     lang_width = model.lang_width(rows),

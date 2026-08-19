@@ -3,6 +3,7 @@
 -- 替代 notify 长文本：译文进入可聚焦浮窗，方便滚动、复制，并可用 e/<CR> 跳到
 -- 既有多语言编辑器
 local hl = require('vv-utils.hl')
+local UIWindow = require('vv-utils.ui_window')
 local entry_value = require('vv-i18n.util').entry_value
 
 local M = {}
@@ -21,9 +22,7 @@ hl.register('vv-i18n.info.hl', {
 })
 
 local function close()
-  if state and state.win and vim.api.nvim_win_is_valid(state.win) then
-    vim.api.nvim_win_close(state.win, true)
-  end
+  if state and state.close_window then state.close_window() end
   state = nil
 end
 
@@ -158,24 +157,24 @@ function M.open(plugin, full_key, opts)
   vim.bo[buf].swapfile = false
   vim.bo[buf].buflisted = false
 
-  local win = vim.api.nvim_open_win(buf, true, {
-    relative = 'editor',
+  local float = UIWindow.open_float(buf, {
     width = width,
     height = height,
-    row = math.max(1, math.floor((vim.o.lines - height) / 2) - 1),
-    col = math.max(0, math.floor((vim.o.columns - width) / 2)),
-    style = 'minimal',
+    margin = 6,
     border = 'rounded',
     title = ' i18n ',
     title_pos = 'center',
+    chrome = {
+      cursorline = true,
+      winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder,CursorLine:PmenuSel',
+    },
   })
-
-  require('vv-utils.ui_window').hide_chrome(win, { cursorline = true })
-  vim.wo[win].winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder,CursorLine:PmenuSel'
+  local win = float.win
 
   state = {
     buf = buf,
     win = win,
+    close_window = float.close,
     plugin = plugin,
     full_key = full_key,
     per = per,

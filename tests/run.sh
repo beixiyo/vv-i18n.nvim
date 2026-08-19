@@ -34,6 +34,10 @@ run_spec() {
   fi
   p="$(printf '%s\n' "$summary" | sed -E 's|^== ([0-9]+) PASS / ([0-9]+) FAIL ==$|\1|')"
   f="$(printf '%s\n' "$summary" | sed -E 's|^== ([0-9]+) PASS / ([0-9]+) FAIL ==$|\2|')"
+  if [ "$p" -eq 0 ]; then
+    echo "Empty spec: expected at least one assertion"
+    process_fail=1
+  fi
   total_pass=$((total_pass + p))
   total_fail=$((total_fail + f))
   echo
@@ -57,9 +61,12 @@ verify_failure_gate() {
   echo
 }
 
-for spec in "$DIR"/writer_spec.lua "$DIR"/index_spec.lua "$DIR"/resolver_spec.lua \
-            "$DIR"/init_spec.lua "$DIR"/integration_spec.lua "$DIR"/panel_model_spec.lua \
-            "$DIR"/panel_spec.lua "$DIR"/references_spec.lua "$DIR"/references_async_spec.lua; do
+specs=("$DIR"/*_spec.lua)
+if [ ! -e "${specs[0]}" ]; then
+  echo "No *_spec.lua files found"
+  exit 1
+fi
+for spec in "${specs[@]}"; do
   run_spec "$spec"
 done
 

@@ -45,7 +45,11 @@ vim.fn.writefile({
   "export default { greeting: { hello: 'Hello' } }",
 }, vim.fs.joinpath(transition_root, 'locales', 'en-US.ts'))
 local transition_source = vim.fs.joinpath(transition_root, 'src', 'App.ts')
-vim.fn.writefile({ "t('greeting.hello')" }, transition_source)
+vim.fn.writefile({
+  "t('greeting.hello')",
+  "t(`greeting.${key}`)",
+  "t(`${prefix}${key}`)",
+}, transition_source)
 local transition_config = {
   root = transition_root,
   sources = {
@@ -61,6 +65,10 @@ check('references transition fixture 初始扫描完成',
   vim.wait(3000, function() return not References.is_scanning() end))
 check('references=true 建立真实引用索引',
   #References.get('greeting.hello') == 1, #References.get('greeting.hello'))
+local transition_snapshot = References.snapshot()
+check('动态模板只记录非空固定前缀',
+  #(transition_snapshot.dynamic_evidence['greeting.*'] or {}) == 1
+    and transition_snapshot.dynamic_evidence['*'] == nil)
 
 local transition_disabled = vim.deepcopy(transition_config)
 transition_disabled.references.enable = false
@@ -76,6 +84,9 @@ i18n.setup(transition_config)
 check('references false→true 会重新扫描禁用期变化', vim.wait(3000, function()
   return not References.is_scanning() and #References.get('greeting.hello') == 2
 end), #References.get('greeting.hello'))
+local next_root_config = H.ns_config()
+i18n.setup(next_root_config)
+check('重配 root 时立即撤销旧引用快照', #References.get('greeting.hello') == 0)
 vim.fn.delete(transition_root, 'rf')
 
 i18n.setup(config)

@@ -1,4 +1,4 @@
--- Reference location navigation.
+-- 引用位置导航
 
 local M = {}
 

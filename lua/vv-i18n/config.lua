@@ -1,4 +1,4 @@
--- Configuration owner. Callers only receive deep-copy snapshots.
+-- 配置归属模块；调用方只能获取深拷贝快照
 local M = {}
 
 ---@type VVI18nConfig
@@ -43,10 +43,27 @@ local defaults = {
     jump_single = false,
     show_zero = false,
     render = nil,
+    scanners = {},
     panel = {
       width = 62,
       position = 'right',
       preview_debounce_ms = 80,
+      state = nil,
+      mappings = nil,
+      on_attach = nil,
+      help = nil,
+      render = nil,
+    },
+  },
+  unused = {
+    copy = {
+      render = nil,
+      definition_language = 'en',
+      include_values = false,
+    },
+    panel = {
+      width = 68,
+      position = 'right',
       state = nil,
       mappings = nil,
       on_attach = nil,
@@ -77,6 +94,12 @@ function M.make(opts)
     end
     if opts.references and opts.references.panel ~= nil then
       cfg.references.panel = vim.tbl_deep_extend('force', vim.deepcopy(defaults.references.panel), opts.references.panel)
+    end
+    if opts.unused ~= nil then
+      cfg.unused = vim.tbl_deep_extend('force', vim.deepcopy(defaults.unused), opts.unused)
+      if opts.unused.panel ~= nil then
+        cfg.unused.panel = vim.tbl_deep_extend('force', vim.deepcopy(defaults.unused.panel), opts.unused.panel)
+      end
     end
   end
   return cfg

@@ -1,4 +1,4 @@
--- Locale source normalization and index rebuilding.
+-- locale 来源归一化与索引重建
 local Index = require('vv-i18n.index')
 local Project = require('vv-i18n.project')
 local Config = require('vv-i18n.config')

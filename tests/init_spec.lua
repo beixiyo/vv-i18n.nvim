@@ -95,9 +95,25 @@ vim.fn.delete(project_root, 'rf')
 i18n.setup(H.ns_config())
 check('命令 VVI18nKeys 注册', vim.fn.exists(':VVI18nKeys') == 2)
 check('命令 VVI18nMissing 注册', vim.fn.exists(':VVI18nMissing') == 2)
+check('命令 VVI18nUnused 注册', vim.fn.exists(':VVI18nUnused') == 2)
 check('命令 VVI18nEdit 注册', vim.fn.exists(':VVI18nEdit') == 2)
 
 i18n.reload()
+vim.wait(1000, function() return not require('vv-i18n.references.index').is_scanning() end, 10)
+local unused_scan = require('vv-i18n.references.index').snapshot()
+check('unused 删除门禁获得完整扫描快照', unused_scan.scan.status == 'complete'
+  and unused_scan.scan.generation == unused_scan.generation)
+vim.cmd('VVI18nUnused')
+local unused_buf = vim.api.nvim_get_current_buf()
+check('VVI18nUnused 打开潜在无用 key 面板', vim.bo[unused_buf].filetype == 'vv-i18n-unused')
+local unused_text = table.concat(vim.api.nvim_buf_get_lines(unused_buf, 0, -1, false), '\n')
+check('unused 快捷键帮助固定在 winbar 而非滚动内容', vim.wo[0].winbar:find('Select', 1, true) ~= nil
+  and unused_text:find('x select', 1, true) == nil)
+local unused_maps = {}
+for _, map in ipairs(vim.api.nvim_buf_get_keymap(unused_buf, 'n')) do unused_maps[map.lhs] = true end
+check('unused 使用 c/C/d/D 复制和删除', unused_maps.c and unused_maps.C and unused_maps.d
+  and unused_maps.D and not unused_maps.a)
+require('vv-i18n.unused.panel').close()
 check('lookup app.common.ok=确定', (i18n.lookup('app.common.ok') or {})['zh-CN']
   and i18n.lookup('app.common.ok')['zh-CN'].value == '确定')
 local files = i18n.files_for('app.hero.title')
@@ -158,6 +174,23 @@ check('多源建 2 索引', #idxs == 2, #idxs)
 check('多源 lookup 源1 app.hero.title', i18n.lookup('app.hero.title') ~= nil)
 check('多源 lookup 源2 common.ok', i18n.lookup('common.ok') ~= nil)
 check('多源 files_for 源2', (function() local f = i18n.files_for('common.ok'); return f and #f == 2 end)())
+
+local scanner_config = H.ns_config()
+scanner_config.references = {
+  scanners = { {
+    id = 'python',
+    extensions = { 'py' },
+    names = { 'gettext' },
+    collect = function() return {} end,
+  } },
+}
+i18n.setup(scanner_config)
+local reference_autocmds = vim.api.nvim_get_autocmds({ group = 'VVI18nReferencesIndex', event = 'BufWritePost' })
+local has_python_pattern = false
+for _, autocmd in ipairs(reference_autocmds) do
+  if autocmd.pattern == '*.py' then has_python_pattern = true end
+end
+check('外部 scanner 扩展保存时的增量扫描监听', has_python_pattern)
 
 done()
 vim.cmd('qa!')

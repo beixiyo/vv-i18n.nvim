@@ -1,8 +1,10 @@
--- Setup, teardown, highlights, autocmds, and user-command registration.
+-- setup、teardown、高亮、autocmd 与用户命令注册
 local Config = require('vv-i18n.config')
 local Index = require('vv-i18n.service.index')
 local Runtime = require('vv-i18n.service.runtime')
 local Commands = require('vv-i18n.service.commands')
+local References = require('vv-i18n.references.index')
+local ReferenceScanners = require('vv-i18n.references.scanners')
 
 local M = {}
 
@@ -26,6 +28,7 @@ local function register_commands(state, plugin)
   command('VVI18nKeys', function() Commands.open_panel(plugin) end, { desc = 'vv-i18n: 键浏览/同步编辑面板' })
   command('VVI18nMissing', function() Commands.open_missing_panel(plugin) end, { desc = 'vv-i18n: 缺失 key 检测面板' })
   command('VVI18nReferences', function() Commands.open_references(plugin) end, { desc = 'vv-i18n: 当前 key 引用侧栏' })
+  command('VVI18nUnused', function() Commands.open_unused_panel(plugin) end, { desc = 'vv-i18n: 潜在无用 key 面板' })
   command('VVI18nEdit', function() Commands.edit_cursor(plugin) end, { desc = 'vv-i18n: 多语言同步编辑' })
   command('VVI18nInfo', function() Commands.info(plugin) end, { desc = 'vv-i18n: 光标处键各语言译文' })
   command('VVI18nJump', function() Commands.jump(plugin) end, { desc = 'vv-i18n: 跳到 locale 定义' })
@@ -40,9 +43,13 @@ end
 
 local function enable_references(state, plugin)
   require('vv-i18n.references.display').enable(plugin, state.config.references)
+  local patterns = {}
+  for _, extension in ipairs(ReferenceScanners.extensions(plugin)) do
+    patterns[#patterns + 1] = '*.' .. extension
+  end
   vim.api.nvim_create_autocmd('BufWritePost', {
     group = vim.api.nvim_create_augroup('VVI18nReferencesIndex', { clear = true }),
-    pattern = { '*.ts', '*.tsx', '*.js', '*.jsx' },
+    pattern = patterns,
     callback = function(event)
       require('vv-i18n.references.index').update_file(plugin, vim.api.nvim_buf_get_name(event.buf))
     end,
@@ -50,6 +57,8 @@ local function enable_references(state, plugin)
 end
 
 function M.reload(state, plugin)
+  -- 先撤销旧 root 的引用快照，避免 A→B 重载窗口暴露旧索引
+  References.clear()
   local indexes = Index.reload(state, plugin)
   apply_display_hl(state)
   return indexes
@@ -64,7 +73,9 @@ function M.setup(state, plugin, opts)
 
   pcall(vim.api.nvim_del_augroup_by_name, 'VVI18nReferencesIndex')
 
+  local had_indexes = state.indexes ~= nil
   Runtime.set_config(state, Config.setup(opts or {}))
+  if had_indexes and not state.indexes then References.clear() end
 
   if not state.config.references.enable then
     require('vv-i18n.references.index').clear()

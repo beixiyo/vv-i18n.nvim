@@ -50,6 +50,21 @@ local fB = B:resolve_files_for_key('common.ok')
 check('B resolve 2 文件', fB and #fB == 2, fB and #fB)
 check('B in_file_path=ok（去掉 ns）', fB and table.concat(fB[1].in_file_path, '.') == 'ok')
 
+-- B2 函数型 lang/mount：公开配置轴必须经真实目录、解析和索引链路验证
+local function B2_lang(path)
+  local lang = path:match('/(en%-US)/') or path:match('/(zh%-CN)/')
+  local ns = path:match('/([^/]+)%.json$')
+  return lang and ns and { lang = lang, ns = ns } or nil
+end
+local B2 = Index.build({
+  dirs = dirsB,
+  prefix = '',
+  lang = B2_lang,
+  mount = function(ctx) return ctx.ns end,
+})
+check('B2 函数 lang/mount 真实索引 filename 布局', B2:get('common.ok') ~= nil
+  and B2:get('home.title') ~= nil and B2:resolve_files_for_key('common.ok')[1].in_file_path[1] == 'ok')
+
 --------------------------------------------------------------------------------
 -- 布局 C：flat（无命名空间）
 --------------------------------------------------------------------------------

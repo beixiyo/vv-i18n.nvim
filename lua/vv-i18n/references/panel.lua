@@ -2,6 +2,7 @@
 
 local TreePanel = require('vv-utils.tree_panel')
 local References = require('vv-i18n.references.index')
+local Ast = require('vv-i18n.ast')
 local Path = require('vv-utils.path')
 local State = require('vv-utils.state')
 
@@ -11,15 +12,10 @@ local active_panel
 local active_key
 local references_state = State.register('vv-i18n', 'references')
 
-local parser_langs = {
-  javascriptreact = 'javascript',
-  typescriptreact = 'tsx',
-}
-
 local function file_lang(path)
   local filetype = vim.filetype.match({ filename = path })
   if not filetype then return nil end
-  return parser_langs[filetype] or vim.treesitter.language.get_lang(filetype) or filetype
+  return Ast.lang_for_filetype(filetype) or vim.treesitter.language.get_lang(filetype) or filetype
 end
 
 local function file_nodes(full_key)

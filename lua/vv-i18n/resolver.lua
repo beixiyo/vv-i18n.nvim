@@ -101,24 +101,47 @@ local function find_t_call(node, content, t_functions)
   return nil, nil
 end
 
---- 字符串/无插值模板字面量 → 内部文本（key 不解码转义，原样剥引号即可）
+--- 字符串/无插值模板字面量 → 运行时文本。
+--- 第二个返回值表示字面量是否可可靠解码；含插值的模板返回 nil,false。
+---@return string? value
+---@return boolean reliable
 local function literal_text(str, content)
   if str:type() == 'template_string' then
     for c in str:iter_children() do
       if c:type() == 'template_substitution' then
-        return nil -- 含 ${}，不是静态 key
+        return nil, false -- 含 ${}，不是静态 key
       end
     end
   end
-  return ast.strip_quotes(ast.node_text(str, content))
+  return ast.decode_string(ast.node_text(str, content))
+end
+
+--- 只提取模板字符串第一个插值前的固定文本；不尝试推导运行时表达式。
+---@return string? prefix
+---@return boolean reliable
+---@return string? raw_prefix
+local function template_prefix(str, content)
+  if str:type() ~= 'template_string' then return nil, true end
+  for child in str:iter_children() do
+    if child:type() == 'template_substitution' then
+      local string_start = ast.byte_range(str)
+      local substitution_start = ast.byte_range(child)
+      -- byte_range 使用 0-based、右开区间；Lua 的 sub 使用 1-based 且两端包含。
+      local raw = content:sub(string_start + 2, substitution_start)
+      local value, reliable = ast.decode_string('`' .. raw .. '`')
+      return value, reliable, raw
+    end
+  end
+  return nil, true
 end
 
 --- 在某声明节点里匹配 `const <name> = hook(...)` / `const { name } = hook(...)`
 ---@return string? hook_name
 ---@return string? hook_arg
+---@return boolean hook_arg_reliable
 local function match_hook_decl(decl, name, content, hook_names)
   if decl:type() ~= 'lexical_declaration' and decl:type() ~= 'variable_declaration' then
-    return nil
+    return nil, nil, true
   end
   for d in decl:iter_children() do
     if d:type() == 'variable_declarator' then
@@ -149,35 +172,37 @@ local function match_hook_decl(decl, name, content, hook_names)
 
       -- 取 hook 的首个字符串参数
       local arg
+      local arg_reliable = true
       local hargs = rhs:field('arguments')[1]
       if hargs then
         for c in hargs:iter_children() do
           if c:type() == 'string' or c:type() == 'template_string' then
-            arg = literal_text(c, content)
+            arg, arg_reliable = literal_text(c, content)
             break
           end
         end
       end
-      return hook, arg
+      return hook, arg, arg_reliable
     end
     ::continue::
   end
-  return nil
+  return nil, nil, true
 end
 
 --- 沿真实作用域向上找 t 的绑定（最近作用域优先）
 ---@return string? hook_name
 ---@return string? hook_arg
+---@return boolean hook_arg_reliable
 local function find_binding(node, name, content, hook_names)
   local scope = node
   while scope do
     for child in scope:iter_children() do
-      local hook, arg = match_hook_decl(child, name, content, hook_names)
-      if hook then return hook, arg end
+      local hook, arg, arg_reliable = match_hook_decl(child, name, content, hook_names)
+      if hook then return hook, arg, arg_reliable end
     end
     scope = scope:parent()
   end
-  return nil
+  return nil, nil, true
 end
 
 --- 拼 prefix 与字面量（prefix 为 nil/'' 时字面量即全键）
@@ -193,12 +218,93 @@ end
 ---@param cfg table
 ---@return table result
 local function resolve_call(call, str, content, cfg)
-  local literal = literal_text(str, content)
-  if not literal then return { ok = false, reason = 'dynamic-key' } end
-
+  local literal, literal_reliable = literal_text(str, content)
   local srow, scol = str:start()
   local erow, ecol = str:end_()
   local range = { srow = srow, scol = scol, erow = erow, ecol = ecol }
+
+  local callee = callee_name(call, content)
+  local hook, hook_arg, hook_arg_reliable = find_binding(call, callee, content, cfg.hook_names)
+  local prefix = cfg.namespace_resolver({
+    hook_name = hook, hook_arg = hook_arg, callee = callee, has_binding = hook ~= nil,
+  })
+
+  if not literal then
+    local fixed, fixed_reliable, raw_fixed = template_prefix(str, content)
+    if not hook_arg_reliable then
+      return {
+        ok = false,
+        reason = 'unreliable-key',
+        unsafe_dynamic = true,
+        dynamic_literal_prefix = fixed or '',
+        literal = ast.node_text(str, content),
+        prefix = prefix,
+        hook = hook,
+        hook_arg = hook_arg,
+        range = range,
+      }
+    end
+    if fixed == nil then
+      return {
+        ok = false,
+        reason = 'dynamic-key',
+        dynamic_literal_prefix = '',
+        literal = ast.node_text(str, content),
+        prefix = prefix,
+        hook = hook,
+        hook_arg = hook_arg,
+        range = range,
+      }
+    end
+
+    if not fixed_reliable then
+      return {
+        ok = false,
+        reason = 'unreliable-key',
+        unsafe_dynamic = true,
+        dynamic_literal_prefix = raw_fixed,
+        literal = ast.node_text(str, content),
+        prefix = prefix,
+        hook = hook,
+        hook_arg = hook_arg,
+        range = range,
+      }
+    end
+
+    local dynamic_prefix = join_key(prefix, fixed, cfg.key_separator)
+    if cfg.namespace_separator and cfg.namespace_separator ~= '' then
+      local at = fixed:find(cfg.namespace_separator, 1, true)
+      if at then
+        local ns = fixed:sub(1, at - 1)
+        local rest = fixed:sub(at + #cfg.namespace_separator)
+        if ns ~= '' then dynamic_prefix = join_key(ns, rest, cfg.key_separator) end
+      end
+    end
+    return {
+      ok = false,
+      reason = 'dynamic-key',
+      dynamic_prefix = dynamic_prefix,
+      dynamic_literal_prefix = fixed,
+      literal = ast.node_text(str, content),
+      prefix = prefix,
+      hook = hook,
+      hook_arg = hook_arg,
+      range = range,
+    }
+  end
+
+  if not literal_reliable or not hook_arg_reliable then
+    return {
+      ok = false,
+      reason = 'unreliable-key',
+      unsafe_dynamic = true,
+      literal = ast.node_text(str, content),
+      prefix = prefix,
+      hook = hook,
+      hook_arg = hook_arg,
+      range = range,
+    }
+  end
 
   -- 绝对命名空间 ns<sep>key（分隔符可配）→ 展开为 ns<key_sep>key，不再叠前缀
   if cfg.namespace_separator and cfg.namespace_separator ~= '' then
@@ -212,13 +318,6 @@ local function resolve_call(call, str, content, cfg)
       end
     end
   end
-
-  local callee = callee_name(call, content)
-  local hook, hook_arg = find_binding(call, callee, content, cfg.hook_names)
-
-  local prefix = cfg.namespace_resolver({
-    hook_name = hook, hook_arg = hook_arg, callee = callee, has_binding = hook ~= nil,
-  })
 
   return {
     ok = true,
@@ -282,7 +381,9 @@ function M.collect_in_content(content, opts)
         local str = first_string_arg(node)
         if str then
           local res = resolve_call(node, str, content, cfg)
-          if res.ok and res.full_key then out[#out + 1] = res end
+          if (res.ok and res.full_key) or res.dynamic_prefix or res.unsafe_dynamic then
+            out[#out + 1] = res
+          end
         end
       end
     end
@@ -301,12 +402,7 @@ function M.resolve_at_cursor(bufnr, opts)
   local win = vim.api.nvim_get_current_win()
   local pos = vim.api.nvim_win_get_cursor(win) -- {row 1-based, col 0-based}
   local content = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
-  if not opts.lang then
-    local ft = vim.bo[bufnr].filetype
-    opts.lang = (ft == 'typescriptreact' or ft == 'javascriptreact') and 'tsx'
-      or (ft == 'javascript' and 'javascript')
-      or 'typescript'
-  end
+  if not opts.lang then opts.lang = ast.lang_for_buffer(bufnr) end
   return M.resolve_in_content(content, pos[1] - 1, pos[2], opts)
 end
 

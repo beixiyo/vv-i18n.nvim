@@ -3,8 +3,10 @@ dofile((debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')) .. '/bootstrap
 
 local SPEC_DIR = debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')
 local H = dofile(SPEC_DIR .. '/helper.lua')
+local ast = require('vv-i18n.ast')
 local resolver = require('vv-i18n.resolver')
 local Index = require('vv-i18n.index')
+local Query = require('vv-i18n.service.query')
 
 local check, done = H.checker()
 
@@ -60,6 +62,13 @@ check('preset hook-arg(无前缀) → arg', ns('hook-arg', '', { hook_arg = 'com
 check('preset hook-arg(有前缀) → prefix.arg', ns('hook-arg', 'app', { hook_arg = 'common' }) == 'app.common')
 check('preset two-level(无参) → prefix', ns('two-level', 'app', {}) == 'app')
 check('preset two-level(有参) → prefix.arg', ns('two-level', 'app', { hook_arg = 'common' }) == 'app.common')
+local custom_namespace = resolver.make_namespace(function(ctx)
+  return ctx.hook_name == 'useT' and 'custom.' .. (ctx.hook_arg or 'root') or nil
+end, '', '.')
+local custom_result = resolver.resolve_in_content(home, r2, c2 + 1, {
+  lang = 'tsx', namespace_resolver = custom_namespace, hook_names = { useT = true },
+})
+check('自定义 namespace 函数参与真实调用解析', custom_result.ok and custom_result.full_key == 'custom.common.ok')
 
 --------------------------------------------------------------------------------
 -- 负路径
@@ -69,7 +78,117 @@ local rp, cp = locate(plain, 'not.key')
 check('非 t 调用 not-in-t-call', (not resolver.resolve_in_content(plain, rp, cp, A).ok), nil)
 local dyn = "const t = useT()\nconst x = t(`hero.${k}`)\n"
 local rd, cd = locate(dyn, 'hero.')
-check('动态 key dynamic-key', resolver.resolve_in_content(dyn, rd, cd, A).reason == 'dynamic-key')
+local dyn_res = resolver.resolve_in_content(dyn, rd, cd, A)
+check('动态 key dynamic-key', dyn_res.reason == 'dynamic-key')
+check('动态 key 保留可证明的固定前缀', dyn_res.dynamic_prefix == 'app.hero.', dyn_res.dynamic_prefix)
+local dyn_all = resolver.collect_in_content(dyn, A)
+check('整文枚举保留动态前缀证据', #dyn_all == 1
+  and dyn_all[1].dynamic_prefix == 'app.hero.')
+local no_fixed = "const t = useT()\nconst x = t(`${prefix}${key}`)\n"
+local no_fixed_result = resolver.collect_in_content(no_fixed, A)[1]
+check('以插值开头的模板不伪造字面前缀', no_fixed_result
+  and no_fixed_result.dynamic_literal_prefix == '')
+
+--------------------------------------------------------------------------------
+-- D. 字符串转义：调用侧与 locale 侧使用同一运行时文本
+--------------------------------------------------------------------------------
+local escaped = [[const t = useT()
+const x = t('hero.\u0074itle')
+]]
+local re, ce = locate(escaped, '\\u0074itle')
+local escaped_result = resolver.resolve_in_content(escaped, re, ce, A)
+check('静态字符串解码 unicode 转义', escaped_result.ok and escaped_result.full_key == 'app.hero.title', escaped_result.full_key)
+local decoded, decoded_reliable = ast.decode_string([["hero.\u0074itle"]])
+check('ast 解码结果标记可靠', decoded == 'hero.title' and decoded_reliable)
+check('locale key strip_quotes 也按运行时解码', ast.strip_quotes([["hero.\u0074itle"]]) == 'hero.title')
+
+local escaped_dynamic = [[const t = useT()
+const x = t(`hero.\u0074i${key}`)
+]]
+local red, ced = locate(escaped_dynamic, '\\u0074i')
+local escaped_dynamic_result = resolver.resolve_in_content(escaped_dynamic, red, ced, A)
+check('动态固定前缀解码 unicode 转义', escaped_dynamic_result.dynamic_prefix == 'app.hero.ti', escaped_dynamic_result.dynamic_prefix)
+
+local unreliable_dynamic = [[const t = useT()
+const x = t(`hero.\u{110000}${key}`)
+]]
+local rud, cud = locate(unreliable_dynamic, '\\u{110000}')
+local unreliable_result = resolver.resolve_in_content(unreliable_dynamic, rud, cud, A)
+check('非法转义不伪造动态前缀', unreliable_result.unsafe_dynamic and unreliable_result.reason == 'unreliable-key', unreliable_result.reason)
+check('非法转义可被整文收集为安全证据', resolver.collect_in_content(unreliable_dynamic, A)[1].unsafe_dynamic)
+
+check('路径语言推断集中在 ast', ast.lang_for_path('x.TSX') == 'tsx'
+  and ast.lang_for_path('x.MJS') == 'javascript')
+check('filetype 语言推断集中在 ast', ast.lang_for_filetype('typescriptreact') == 'tsx'
+  and ast.lang_for_filetype('javascript') == 'javascript')
+
+--------------------------------------------------------------------------------
+-- E. 多 source 聚合：同一调用的歧义不能被 row:col 覆盖
+--------------------------------------------------------------------------------
+local function fake_index(entries)
+  local index = { entries = entries, all_keys_calls = 0 }
+  function index:any_keys() return next(self.entries) ~= nil end
+  function index:all_keys()
+    self.all_keys_calls = self.all_keys_calls + 1
+    local out = {}
+    for key in pairs(self.entries) do out[#out + 1] = key end
+    table.sort(out)
+    return out
+  end
+  function index:get(full_key) return self.entries[full_key] end
+  function index:owns(full_key) return self.entries[full_key] ~= nil end
+  return index
+end
+
+local function query_source(namespace, index)
+  return {
+    index = index,
+    ropts = {
+      namespace_resolver = resolver.make_namespace('fixed', namespace, '.'),
+      namespace_separator = ':',
+      key_separator = '.',
+      t_functions = { t = true },
+      hook_names = { useT = true },
+    },
+  }
+end
+
+local common_entry = { ['en-US'] = { value = 'ok' } }
+local app_index = fake_index({ ['app.ok'] = common_entry })
+local common_index = fake_index({ ['common.ok'] = common_entry })
+local query_state = { indexes = {
+  query_source('app', app_index),
+  query_source('common', common_index),
+} }
+local ambiguous_results = Query.collect_content(query_state, {}, "const t = useT()\nt('ok')", 'fixture.ts')
+local ambiguous = ambiguous_results[1]
+check('多 source 不覆盖不同 full key', ambiguous and ambiguous.kind == 'ambiguous'
+  and #ambiguous.full_keys == 2 and ambiguous.full_keys[1] == 'app.ok'
+  and ambiguous.full_keys[2] == 'common.ok', ambiguous and ambiguous.kind)
+check('歧义结果保留 source_ids/candidates', ambiguous and #ambiguous.source_ids == 2
+  and #ambiguous.candidates == 2)
+
+local dynamic_index = fake_index({ ['app.hero.title'] = common_entry, ['app.hero.body'] = common_entry })
+local dynamic_state = { indexes = { query_source('app', dynamic_index) } }
+local dynamic_results = Query.collect_content(dynamic_state, {}, [[const t = useT()
+const a = t(`hero.${key}`)
+const b = t(`hero.${other}`)
+]], 'fixture.ts')
+local dynamic_count = 0
+for _, result in ipairs(dynamic_results) do
+  if result.kind == 'dynamic' then dynamic_count = dynamic_count + 1 end
+end
+check('多个动态调用各自保留完整且不重复的候选', dynamic_count == 2
+  and dynamic_results[1].pattern == 'app.hero.*'
+  and dynamic_results[2].pattern == 'app.hero.*')
+
+local unsafe_index = fake_index({ ['app.hero.title'] = common_entry })
+local unsafe_state = { indexes = { query_source('app', unsafe_index) } }
+local unsafe_results = Query.collect_content(unsafe_state, {}, [[const t = useT()
+const x = t(`hero.\u12${key}`)
+]], 'fixture.ts')
+check('不可靠转义转换为全局动态保护', unsafe_results[1] and unsafe_results[1].kind == 'dynamic'
+  and unsafe_results[1].unsafe and unsafe_results[1].pattern == '*')
 
 --------------------------------------------------------------------------------
 -- 端到端：resolver → index（三布局各命中）

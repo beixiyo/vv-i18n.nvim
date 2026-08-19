@@ -1,4 +1,4 @@
--- LuaLS-only public type declarations. Runtime code must not depend on this module.
+-- 仅供 LuaLS 使用的公共类型声明；运行时代码不得依赖此模块
 ---@class VVI18nSource
 ---@field prefix? string         命名空间根；''=无前缀 @default ''
 ---@field root? string           本源扫描根（相对 config.root 或绝对） @default config.root
@@ -26,6 +26,7 @@
 ---@field display VVI18nDisplayConfig
 ---@field panel VVI18nKeyPanelConfig
 ---@field references VVI18nReferencesConfig
+---@field unused VVI18nUnusedConfig
 ---@field ft string[]            生效文件类型 @default ts/tsx/js/jsx
 ---@field project_config boolean 探测项目根 .vv-i18n.lua（首次信任后全覆盖本配置） @default true
 ---@field parse? fun(content: string, path: string): table?  自定义读侧解析（YAML/PO 等）；返回 { leaves: VVI18nLeaf[], top_keys?: string[] }。nil=默认 tree-sitter（JS/JSON）
@@ -79,7 +80,30 @@
 ---@field jump_single boolean    单个引用时直接跳转，不打开侧栏 @default false
 ---@field show_zero boolean      是否显示零引用虚拟文本 @default false
 ---@field render? fun(ctx: table): (string|table[]|nil)  定义处虚拟文本自定义渲染
+---@field scanners VVI18nReferenceScanner[]  附加引用 scanner；相同扩展名覆盖内置 JS/TS scanner @default {}
 ---@field panel VVI18nReferencesPanelConfig
+
+---@class VVI18nReferenceScanner
+---@field id? string             诊断标识 @default custom-N
+---@field extensions string[]    支持的扩展名，不带前导点
+---@field names string[]         用于候选文件预筛选的调用名
+---@field collect fun(ctx: VVI18nReferenceScannerContext): VVI18nReferenceResult[]  返回引用证据；抛错会阻断完整扫描
+
+---@class VVI18nReferenceScannerContext
+---@field content string
+---@field path string            文件绝对路径
+---@field root string            项目根
+---@field extension string
+---@field scanner string         scanner id
+
+---@class VVI18nReferenceResult
+---@field kind 'hit'|'dynamic'|'ambiguous'|'missing'
+---@field range {srow: integer, scol: integer, erow?: integer, ecol?: integer}  0-based 源码范围
+---@field literal? string        源码中的原始或解码后 key
+---@field full_key? string       hit/missing 的完整 key
+---@field pattern? string        dynamic 保护模式，例如 cards.*
+---@field prefix? string         dynamic 的静态固定前缀
+---@field full_keys? string[]    ambiguous 的所有可能完整 key
 
 ---@class VVI18nReferencesPanelConfig
 ---@field width integer          侧栏宽度 @default 62
@@ -90,5 +114,23 @@
 ---@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口
 ---@field help? false|VVTreePanelHelpOptions  g? 帮助面板配置 @default nil
 ---@field render? fun(ctx: VVTreePanelRenderContext): VVTreePanelRenderRow|string  节点自定义渲染
+
+---@class VVI18nUnusedConfig
+---@field copy VVI18nUnusedCopyConfig
+---@field panel VVI18nUnusedPanelConfig
+
+---@class VVI18nUnusedCopyConfig
+---@field render? fun(ctx: table): string  自定义复制内容；nil=紧凑 Markdown 审查提示
+---@field definition_language string  定义路径和值使用的语言；'all'=全部，缺失时稳定回退到首个语言 @default 'en'
+---@field include_values boolean  是否在定义路径后输出该语言的翻译值 @default false
+
+---@class VVI18nUnusedPanelConfig
+---@field width integer @default 68
+---@field position 'left'|'right' @default 'right'
+---@field state? VVStateHandle
+---@field mappings? false|VVTreePanelMappings
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)
+---@field help? false|VVTreePanelHelpOptions
+---@field render? VVTreePanelRenderers
 
 return {}

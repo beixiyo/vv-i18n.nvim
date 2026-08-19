@@ -24,10 +24,10 @@ function M.node_text(node, content)
   return vim.treesitter.get_node_text(node, content)
 end
 
---- 去掉成对的首尾引号（单 / 双 / 反引号）
+--- 去掉成对的首尾引号（单 / 双 / 反引号），不解码转义
 ---@param s string
 ---@return string
-function M.strip_quotes(s)
+local function raw_body(s)
   if #s >= 2 then
     local a, b = s:sub(1, 1), s:sub(-1)
     if (a == '"' or a == "'" or a == '`') and a == b then
@@ -37,13 +37,32 @@ function M.strip_quotes(s)
   return s
 end
 
---- 把 JS 字符串字面量「文本」解码成真实字符串（处理转义）
---- 仅做单遍扫描，覆盖常见转义；未知 `\x` 原样保留反斜杠后字符
----@param literal string  含引号的字面量文本，如 "'a\\nb'"
+--- 去掉成对的首尾引号并解码转义，供 locale key 等字符串上下文使用
+---@param s string
 ---@return string
+function M.strip_quotes(s)
+  local value = M.decode_string(s)
+  return value
+end
+
+local function append_codepoint(out, codepoint)
+  if codepoint < 0 or codepoint > 0x10FFFF then return false end
+  local ok, value = pcall(vim.fn.nr2char, codepoint)
+  if not ok or type(value) ~= 'string' then return false end
+  out[#out + 1] = value
+  return true
+end
+
+--- 把 JS 字符串字面量「文本」解码成真实字符串（处理转义）
+--- 返回第二个值表示是否可以可靠地还原运行时字符串；非法 \u/\x、尾部反斜杠
+--- 和超出 Unicode 范围的转义会返回 false，调用方不得据此生成可删除结论
+---@param literal string  含引号的字面量文本，如 "'a\\nb'"
+---@return string value
+---@return boolean reliable
 function M.decode_string(literal)
-  local body = M.strip_quotes(literal)
+  local body = raw_body(literal)
   local out = {}
+  local reliable = true
   local i = 1
   local n = #body
   while i <= n do
@@ -55,41 +74,67 @@ function M.decode_string(literal)
       elseif nx == 'r' then out[#out + 1] = '\r'; i = i + 2
       elseif nx == 'b' then out[#out + 1] = '\b'; i = i + 2
       elseif nx == 'f' then out[#out + 1] = '\f'; i = i + 2
-      elseif nx == '0' then out[#out + 1] = '\0'; i = i + 2
+      elseif nx == 'v' then out[#out + 1] = '\v'; i = i + 2
+      elseif nx == '0' then
+        if body:sub(i + 2, i + 2):match('[0-9]') then reliable = false end
+        out[#out + 1] = '\0'; i = i + 2
+      elseif nx == '\n' then
+        -- JS 字符串/模板中的反斜杠换行是 line continuation，不产生字符。
+        i = i + 2
+      elseif nx == '\r' then
+        i = i + 2
+        if body:sub(i, i) == '\n' then i = i + 1 end
       elseif nx == '\\' or nx == "'" or nx == '"' or nx == '`' or nx == '/' then
         out[#out + 1] = nx; i = i + 2
       elseif nx == 'u' then
         local hex = body:sub(i + 2):match('^%x%x%x%x')
         if hex then
-          out[#out + 1] = vim.fn.nr2char(tonumber(hex, 16))
+          local ok = append_codepoint(out, tonumber(hex, 16))
+          reliable = reliable and ok
           i = i + 6
         else
           -- \u{XXXX} 形式
           local braced = body:sub(i + 2):match('^{(%x+)}')
           if braced then
-            out[#out + 1] = vim.fn.nr2char(tonumber(braced, 16))
+            local ok = append_codepoint(out, tonumber(braced, 16))
+            reliable = reliable and ok
             i = i + 4 + #braced
           else
-            out[#out + 1] = nx; i = i + 2
+            reliable = false
+            out[#out + 1] = nx
+            i = i + 2
           end
         end
       elseif nx == 'x' then
         local hex = body:sub(i + 2):match('^%x%x')
         if hex then
-          out[#out + 1] = vim.fn.nr2char(tonumber(hex, 16))
+          local ok = append_codepoint(out, tonumber(hex, 16))
+          reliable = reliable and ok
           i = i + 4
         else
-          out[#out + 1] = nx; i = i + 2
+          reliable = false
+          out[#out + 1] = nx
+          i = i + 2
         end
       else
+        -- JS 的 NonEscapeCharacter 运行时会去掉反斜杠；这不是未知语义。
+        -- 八进制和 \8/\9 在不同语法模式下存在差异，保守地视为不可靠。
+        if nx:match('[0-9]') then reliable = false end
         out[#out + 1] = nx; i = i + 2
       end
+    elseif c == '\\' then
+      reliable = false
+      i = i + 1
+    elseif c == '\r' then
+      -- 字符串/模板字面量中的反斜杠换行由上一个分支处理；裸 CR 仍保留。
+      out[#out + 1] = c
+      i = i + 1
     else
       out[#out + 1] = c
       i = i + 1
     end
   end
-  return table.concat(out)
+  return table.concat(out), reliable
 end
 
 --- 把真实字符串编码成目标引号风格的字面量（与 decode_string 对称）
@@ -235,12 +280,33 @@ end
 ---@param path string
 ---@return string
 function M.lang_for_path(path)
-  local ext = path:match('%.([%w]+)$')
+  local ext = (path or ''):match('%.([%w]+)$')
+  ext = ext and ext:lower() or nil
   if ext == 'tsx' then return 'tsx' end
   if ext == 'jsx' then return 'tsx' end
   if ext == 'js' or ext == 'mjs' or ext == 'cjs' then return 'javascript' end
   if ext == 'json' then return 'json' end
   return 'typescript'
+end
+
+--- 按 Neovim filetype 推断 tree-sitter 语言；未知 filetype 返回 nil，交给路径推断
+---@param filetype string?
+---@return string?
+function M.lang_for_filetype(filetype)
+  if filetype == 'typescriptreact' or filetype == 'javascriptreact' then return 'tsx' end
+  if filetype == 'javascript' then return 'javascript' end
+  if filetype == 'json' then return 'json' end
+  if filetype == 'typescript' then return 'typescript' end
+  return nil
+end
+
+--- 按 buffer 的 filetype 优先、文件路径兜底推断 tree-sitter 语言
+---@param bufnr integer
+---@return string
+function M.lang_for_buffer(bufnr)
+  local by_filetype = M.lang_for_filetype(vim.bo[bufnr].filetype)
+  if by_filetype then return by_filetype end
+  return M.lang_for_path(vim.api.nvim_buf_get_name(bufnr))
 end
 
 return M

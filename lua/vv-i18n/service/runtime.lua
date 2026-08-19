@@ -1,4 +1,4 @@
--- Private runtime owner. No module-level plugin state escapes this instance.
+-- 私有运行时归属对象；插件状态不会从模块级实例中泄漏
 local Config = require('vv-i18n.config')
 
 local M = {}

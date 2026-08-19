@@ -148,32 +148,46 @@ Literal `namespace` strategies mean:
 
 `prefix` belongs only to the source and is shared by indexing and call-site resolution as a single source of truth. Pair `mount` and `namespace` consistently, as in each layout above.
 
-## Complete configuration
+## Complete configuration reference
 
 ```lua
 require('vv-i18n').setup({
-  root = nil,                          -- nil enables automatic detection
-  hooks = { 'useTranslation' },        -- Global defaults, overridable per source
+  root = nil,                          -- nil: auto-detect project root
+  sources = {
+    {
+      prefix = '',
+      root = nil,                      -- Relative to the project root, or absolute
+      discover = nil,                  -- Glob array or function(root) -> directories
+      dirs = nil,                      -- Explicit directories, combined with discover
+      lang = nil,                      -- Override global lang
+      mount = nil,                     -- Override global mount
+      namespace = nil,                 -- Override global namespace
+      hooks = nil,                     -- Override global hooks
+      t = nil,                         -- Override global translation function names
+      parse = nil,                     -- Override global read-side parser
+    },
+  },
+  hooks = { 'useTranslation' },
   t = { 't' },
-  lang = { '{lang}.ts', '{lang}.json' },
+  lang = { '{lang}.ts', '{lang}.tsx', '{lang}.js', '{lang}.json' },
   mount = 'top-key',
   namespace = 'hook-arg',
-  sources = { --[[ see above ]] },
-  namespace_separator = ':',           -- Absolute namespace ns<sep>key; '' disables it
+  namespace_separator = ':',
   key_separator = '.',
-  quote_style = 'auto',                -- single | double | auto when writing
-  indent = nil,                        -- nil infers indentation when writing
-  project_config = true,               -- Detect .vv-i18n.lua at the project root
-  parse = nil,                         -- Custom read-side parser for non-JS/JSON formats
+  quote_style = 'auto',                -- 'single' | 'double' | 'auto'
+  indent = nil,                        -- nil: infer from the target file
   display = {
     enable = true,
+    lang = nil,
     preferred_langs = {},              -- Empty selects the first language alphabetically
     max_width = 40,
     icon = '󰗊 ',
-    style = nil,                       -- Translation style overriding its highlight
+    missing_icon = '⚠ ',
+    hl = 'VVI18nPreview',
+    missing_hl = 'VVI18nMissing',
+    style = nil,                       -- Highlight attributes overriding hl
     missing_style = nil,
-    -- hl, missing_hl, lang, and missing_icon may also be overridden
-    render = nil,                      -- Fully custom rendering function
+    render = nil,                      -- function(ctx) -> string | virt-text chunks | nil
   },
   panel = {
     width = 56,
@@ -182,27 +196,57 @@ require('vv-i18n').setup({
     mappings = nil,                    -- nil=defaults, false=none, table=replace
     on_attach = nil,
     help = nil,
-    render = nil,                      -- Custom winbar/header/node/empty/footer renderers
+    render = nil,                      -- winbar/header/node/empty/footer renderers
   },
   references = {
     enable = true,
     icon = '󰗊 ',
     hl = 'Comment',
     jump_single = false,               -- Jump directly when exactly one reference exists
-    show_zero = false,                 -- Show "0 references" virtual text
-    panel = { width = 62, position = 'right', preview_debounce_ms = 80 },
+    show_zero = false,                 -- Show zero-reference virtual text
+    render = nil,                      -- Definition reference-count renderer
+    scanners = {},                     -- Additional or replacement language scanners
+    panel = {
+      width = 62,
+      position = 'right',
+      preview_debounce_ms = 80,
+      state = nil,
+      mappings = nil,
+      on_attach = nil,
+      help = nil,
+      render = nil,                    -- Reference-node renderer
+    },
   },
+  unused = {
+    copy = {
+      definition_language = 'en',      -- 'all' or one locale; stable fallback when absent
+      include_values = false,
+      render = nil,                    -- function(ctx) -> Markdown string
+    },
+    panel = {
+      width = 68,
+      position = 'right',
+      state = nil,
+      mappings = nil,
+      on_attach = nil,
+      help = nil,
+      render = nil,
+    },
+  },
+  ft = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
+  project_config = true,               -- Load a trusted .vv-i18n.lua
+  parse = nil,                         -- Custom read-side parser
 })
 ```
 
 ### Custom `display.render`
 
-The renderer receives context and returns a string or virtual-text chunks. Returning `nil` uses the default renderer.
+The renderer receives the following context and returns a string, virtual-text chunks, or `nil` to use the default:
 
 ```lua
 display = {
   render = function(ctx)
-    -- { full_key, value, lang, kind, missing, per, literal, icon, hl, max_width }
+    -- ctx = { full_key, value, lang, kind, missing, per, literal, icon, hl, max_width }
     if ctx.missing then return { { '✗ ' .. ctx.literal, 'Error' } } end
     return { { ctx.icon, 'Comment' }, { ctx.value, 'String' } }
   end,
@@ -254,6 +298,7 @@ Return `{ leaves = VVI18nLeaf[], top_keys? }`, where each leaf is `{ path=string
 | `:VVI18nKeys` | Browse keys, inspect completeness, and synchronize values |
 | `:VVI18nMissing` | Show only missing keys, grouped by missing language |
 | `:VVI18nReferences` | Open a foldable reference sidebar for the key under the cursor |
+| `:VVI18nUnused` | Audit, copy, and delete potentially unused keys |
 | `:VVI18nEdit` | Edit all language values for the key under the cursor |
 | `:VVI18nInfo` | Show every translation for the key under the cursor |
 | `:VVI18nJump` | Jump to a locale definition |
@@ -261,6 +306,35 @@ Return `{ leaves = VVI18nLeaf[], top_keys? }`, where each leaf is `{ path=string
 | `:VVI18nAddKey` | Add missing language values |
 | `:VVI18nReload` | Rebuild the index |
 | `:VVI18nEnable`, `:VVI18nDisable`, `:VVI18nToggle` | Control inline previews |
+
+### Potentially unused keys
+
+`:VVI18nUnused` lists candidates with no references found by the configured static scanner.
+
+For dynamic templates such as ``t(`prefix.${value}`)``, the scanner records only the statically provable prefix
+and call location; it does not infer runtime values. Matching keys appear under `Unknown`
+
+### Reference scanners for other languages
+
+The built-in scanner handles `ts`, `tsx`, `js`, and `jsx`. Add another language with an adapter:
+
+```lua
+references = {
+  scanners = {
+    {
+      id = 'python',
+      extensions = { 'py' },
+      names = { 'gettext', '_' },
+      collect = function(ctx)
+        return my_python_i18n_scanner(ctx.content, ctx.path)
+      end,
+    },
+  },
+}
+```
+
+`collect` returns `hit`, `dynamic`, `ambiguous`, or `missing` items with a zero-based `range`; see
+[`VVI18nReferenceResult`](lua/vv-i18n/types.lua) for the fields.
 
 ## Tests
 

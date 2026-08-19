@@ -1,15 +1,33 @@
--- 项目引用索引：先用 rg 筛出候选文件，再交给 vv-i18n 的 tree-sitter resolver 精确解析
+-- 项目引用索引：协调 rg 扫描、tree-sitter 解析和按请求发布快照
 
 local fs = require('vv-utils.fs')
-local scan_scope = require('vv-utils.async').scope({ cancel_previous = true })
+local async = require('vv-utils.async')
+local Store = require('vv-i18n.references.store')
+local Scanners = require('vv-i18n.references.scanners')
 
+local scan_scope = async.scope({ cancel_previous = true })
+local store = Store.new()
 local M = {}
+
+local function new_scan(status, generation, root, extensions)
+  return {
+    status = status,
+    generation = generation,
+    root = root,
+    files = 0,
+    parsed = 0,
+    failures = {},
+    warnings = {},
+    source_fingerprints = {},
+    extensions = vim.deepcopy(extensions or {}),
+  }
+end
 
 local state = {
   scanning = false,
-  by_key = {},
-  by_file = {},
+  generation = 0,
   listeners = {},
+  scan = new_scan('idle', 0),
 }
 
 local function emit()
@@ -25,37 +43,118 @@ local function escape_regex(value)
   return (value:gsub('([\\.^$|?*+(){}%[%]])', '\\%1'))
 end
 
-local function remove_file(path)
-  for _, ref in ipairs(state.by_file[path] or {}) do
-    local items = state.by_key[ref.full_key] or {}
-    for index = #items, 1, -1 do
-      if items[index].file == path then table.remove(items, index) end
-    end
-    if #items == 0 then state.by_key[ref.full_key] = nil end
-  end
-  state.by_file[path] = nil
+local function is_current(request)
+  return not request or request:is_current()
 end
 
----@param request? vv-utils.async.Request
----@return boolean current
-local function index_file(plugin, path, root, request)
-  local function is_current()
-    return not request or request:is_current()
-  end
+local function add_failure(request, failure)
+  if not is_current(request) then return false end
+  state.scan.failures[#state.scan.failures + 1] = failure
+  return true
+end
 
+local function sort_failures()
+  table.sort(state.scan.failures, function(a, b)
+    local af = a.file or ''
+    local bf = b.file or ''
+    if af == bf then
+      local ar = a.reason or ''
+      local br = b.reason or ''
+      if ar == br then return (a.detail or '') < (b.detail or '') end
+      return ar < br
+    end
+    return af < bf
+  end)
+end
+
+local function sort_warnings()
+  table.sort(state.scan.warnings, function(a, b)
+    if a.file == b.file then
+      if a.row == b.row then return (a.col or 0) < (b.col or 0) end
+      return (a.row or 0) < (b.row or 0)
+    end
+    return (a.file or '') < (b.file or '')
+  end)
+end
+
+local function finish(request, callback)
+  if not request:is_current() then return false end
+  local remained_current = request:finish()
+  if remained_current and callback then callback() end
+  return remained_current
+end
+
+local function fail_scan(request, callback, failure)
+  if not request:is_current() then return false end
+  state.scanning = false
+  state.scan.status = 'failed'
+  add_failure(request, failure)
+  sort_failures()
+  emit()
+  return finish(request, callback)
+end
+
+local function build_registry(plugin, request)
+  local ok, registry = pcall(Scanners.build, plugin)
+  if not request:is_current() then return nil, nil end
+  if not ok then return nil, tostring(registry) end
+  return registry, nil
+end
+
+local function complete_scan(request, callback)
+  if not request:is_current() then return false end
+  store.sort()
+  sort_failures()
+  sort_warnings()
+  state.scanning = false
+  state.scan.status = #state.scan.failures == 0 and 'complete' or 'failed'
+  emit()
+  return finish(request, callback)
+end
+
+local function index_file(path, root, request, registry)
   local ok, content = pcall(fs.read_all, path)
 
-  if not is_current() then return false end
-  if not ok or type(content) ~= 'string' then return true end
+  if not is_current(request) then return false end
+  state.scan.source_fingerprints[path] = nil
+  if not ok or type(content) ~= 'string' then
+    store.remove_file(path)
+    add_failure(request, { file = path, reason = 'read-failed' })
+    return true
+  end
+
+  local scanner, extension = registry.for_path(path)
+  if not scanner then
+    store.remove_file(path)
+    add_failure(request, { file = path, reason = 'reference-scanner-unavailable' })
+    return true
+  end
 
   local lines = vim.split(content, '\n', { plain = true })
-  local refs = {}
-  local results = plugin.collect_content(content, path)
+  local results, warnings, collect_error = Scanners.collect(scanner, {
+    content = content,
+    path = path,
+    root = root,
+    extension = extension,
+    scanner = scanner.id,
+  })
+  if not is_current(request) then return false end
+  if not results then
+    store.remove_file(path)
+    add_failure(request, { file = path, reason = collect_error or 'collect-content-failed', scanner = scanner.id })
+    return true
+  end
+  for _, warning in ipairs(warnings) do
+    warning.file = path
+    warning.scanner = scanner.id
+    state.scan.warnings[#state.scan.warnings + 1] = warning
+  end
+  state.scan.source_fingerprints[path] = vim.fn.sha256(content)
+  state.scan.parsed = state.scan.parsed + 1
 
-  if not is_current() then return false end
-
+  local refs, dynamic_refs = {}, {}
   for _, result in ipairs(results) do
-    if not is_current() then return false end
+    if not is_current(request) then return false end
 
     if result.kind == 'hit' then
       local ref = {
@@ -68,19 +167,36 @@ local function index_file(plugin, path, root, request)
         line = vim.trim(lines[result.range.srow + 1] or ''),
       }
       refs[#refs + 1] = ref
+    elseif result.kind == 'dynamic' then
+      dynamic_refs[#dynamic_refs + 1] = {
+        pattern = result.pattern,
+        prefix = result.prefix,
+        literal = result.literal,
+        file = path,
+        relative = relative(path, root),
+        row = result.range.srow + 1,
+        col = result.range.scol,
+        line = vim.trim(lines[result.range.srow + 1] or ''),
+      }
+    elseif result.kind == 'ambiguous' then
+      for _, full_key in ipairs(result.full_keys or {}) do
+        dynamic_refs[#dynamic_refs + 1] = {
+          pattern = full_key,
+          prefix = full_key,
+          literal = result.literal,
+          reason = result.reason,
+          file = path,
+          relative = relative(path, root),
+          row = result.range.srow + 1,
+          col = result.range.scol,
+          line = vim.trim(lines[result.range.srow + 1] or ''),
+        }
+      end
     end
   end
 
-  if not is_current() then return false end
-  remove_file(path)
-
-  for _, ref in ipairs(refs) do
-    state.by_key[ref.full_key] = state.by_key[ref.full_key] or {}
-    state.by_key[ref.full_key][#state.by_key[ref.full_key] + 1] = ref
-  end
-
-  state.by_file[path] = refs
-
+  if not is_current(request) then return false end
+  store.replace_file(path, refs, dynamic_refs)
   return true
 end
 
@@ -88,60 +204,55 @@ end
 ---@param callback? fun()
 function M.refresh(plugin, callback)
   local request = scan_scope:begin()
+  state.generation = state.generation + 1
+  local generation = state.generation
   local root = plugin.get_state().root
 
   if not request:is_current() then return end
+
+  -- 每次新扫描都使用新的仓库，绝不混入旧快照
+  store.clear()
   if not root then
     state.scanning = false
+    state.scan = new_scan('failed', generation)
+    add_failure(request, { reason = 'project-root-unavailable' })
     emit()
-    if not request:is_current() then return end
-    request:finish()
-    if callback then callback() end
+    finish(request, callback)
     return
   end
 
   state.scanning = true
-  state.by_key = {}
-  state.by_file = {}
+  state.scan = new_scan('scanning', generation, root)
   emit()
   if not request:is_current() then return end
 
-  local names = plugin.reference_names()
+  local registry, registry_error = build_registry(plugin, request)
   if not request:is_current() then return end
-  if #names == 0 then
-    state.scanning = false
-    emit()
-    if not request:is_current() then return end
-    request:finish()
-    if callback then callback() end
+  if not registry then
+    fail_scan(request, callback, { reason = 'reference-scanner-invalid', detail = registry_error })
     return
   end
+  state.scan.extensions = vim.deepcopy(registry.extensions)
 
   local escaped = {}
-  for _, name in ipairs(names) do
-    escaped[#escaped + 1] = escape_regex(name)
-  end
-  local pattern = [[\b(]] .. table.concat(escaped, '|') .. [[)\s*\(]]
+  for _, name in ipairs(registry.names) do escaped[#escaped + 1] = escape_regex(name) end
+  local pattern = [[(^|[^[:alnum:]_$])(]] .. table.concat(escaped, '|') .. [[)\s*\(]]
   local command = {
     'rg',
     '--files-with-matches',
     '--hidden',
-    '--glob', '*.{ts,tsx,js,jsx}',
     '--glob', '!**/node_modules/**',
     '--glob', '!**/.git/**',
     pattern,
     '.',
   }
+  for _, extension in ipairs(registry.extensions) do
+    table.insert(command, #command, '--glob')
+    table.insert(command, #command, '*.' .. extension)
+  end
 
   if vim.fn.executable('rg') ~= 1 then
-    if not request:is_current() then return end
-    state.scanning = false
-    emit()
-
-    if not request:is_current() then return end
-    request:finish()
-
-    if callback then callback() end
+    fail_scan(request, callback, { reason = 'rg-unavailable' })
     return
   end
 
@@ -149,7 +260,16 @@ function M.refresh(plugin, callback)
     vim.schedule(function()
       if not request:is_current() then return end
 
+      if result.code ~= 0 and result.code ~= 1 then
+        fail_scan(request, callback, {
+          reason = 'rg-failed:' .. tostring(result.code),
+          detail = vim.trim(result.stderr or ''),
+        })
+        return
+      end
+
       local files = result.code == 0 and vim.split(result.stdout or '', '\n', { trimempty = true }) or {}
+      state.scan.files = #files
       local index = 1
 
       local function batch()
@@ -158,10 +278,10 @@ function M.refresh(plugin, callback)
         local last = math.min(index + 19, #files)
         for current = index, last do
           if not index_file(
-            plugin,
             root .. '/' .. files[current]:gsub('^%./', ''),
             root,
-            request
+            request,
+            registry
           ) then return end
         end
         index = last + 1
@@ -171,21 +291,7 @@ function M.refresh(plugin, callback)
           return
         end
 
-        for _, refs in pairs(state.by_key) do
-          table.sort(refs, function(a, b)
-            if a.relative == b.relative then
-              if a.row == b.row then return a.col < b.col end
-              return a.row < b.row
-            end
-            return a.relative < b.relative
-          end)
-        end
-
-        state.scanning = false
-        emit()
-        if not request:is_current() then return end
-        request:finish()
-        if callback then callback() end
+        complete_scan(request, callback)
       end
 
       batch()
@@ -201,16 +307,56 @@ end
 ---@param path string
 function M.update_file(plugin, path)
   local root = plugin.get_state().root
-  if not root or not vim.startswith(path, root .. '/') then return end
+  if not root then
+    M.refresh(plugin)
+    return
+  end
+  if not vim.startswith(path, root .. '/') then return end
 
-  index_file(plugin, path, root)
-  emit()
+  -- 全量扫描进行中，或当前快照属于其他根目录时，局部更新不能发布完整快照
+  if state.scanning or state.scan.status ~= 'complete' or state.scan.root ~= root then
+    M.refresh(plugin)
+    return
+  end
+
+  local request = scan_scope:begin()
+  state.generation = state.generation + 1
+  local generation = state.generation
+  if not request:is_current() then return end
+
+  state.scan.generation = generation
+  state.scan.failures = {}
+  for index = #state.scan.warnings, 1, -1 do
+    if state.scan.warnings[index].file == path then table.remove(state.scan.warnings, index) end
+  end
+  local registry, registry_error = build_registry(plugin, request)
+  if not request:is_current() then return end
+  if not registry then
+    fail_scan(request, nil, { reason = 'reference-scanner-invalid', detail = registry_error })
+    return
+  end
+  state.scan.extensions = vim.deepcopy(registry.extensions)
+  if not index_file(path, root, request, registry) then return end
+  if not request:is_current() then return end
+
+  complete_scan(request)
 end
 
 ---@param full_key string
 ---@return table[]
 function M.get(full_key)
-  return state.by_key[full_key] or {}
+  return store.get(full_key)
+end
+
+function M.snapshot()
+  local data = store.snapshot()
+  return vim.deepcopy({
+    scanning = state.scanning,
+    generation = state.generation,
+    by_key = data.by_key,
+    dynamic_evidence = data.dynamic_evidence,
+    scan = state.scan,
+  })
 end
 
 ---@param callback fun()
@@ -230,9 +376,10 @@ end
 
 function M.clear()
   scan_scope:cancel()
+  state.generation = state.generation + 1
   state.scanning = false
-  state.by_key = {}
-  state.by_file = {}
+  store.clear()
+  state.scan = new_scan('idle', state.generation)
   emit()
 end
 

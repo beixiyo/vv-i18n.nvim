@@ -1,4 +1,4 @@
--- Command handlers and interactive entry points.
+-- 命令处理器与交互入口
 local writer = require('vv-i18n.writer')
 
 local M = {}
@@ -92,6 +92,10 @@ function M.open_references(plugin)
     return
   end
   panel.toggle(plugin, full_key)
+end
+
+function M.open_unused_panel(plugin)
+  require('vv-i18n.unused.panel').toggle(plugin)
 end
 
 function M.edit_cursor(plugin)

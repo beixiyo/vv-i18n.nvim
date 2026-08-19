@@ -230,8 +230,4 @@ function M.toggle(plugin, opts)
   end
 end
 
-function M.missing_count(plugin)
-  return Model.missing_total(plugin and plugin.tree() or {})
-end
-
 return M

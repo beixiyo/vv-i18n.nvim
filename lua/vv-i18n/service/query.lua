@@ -1,4 +1,4 @@
--- Read-only public queries over the private runtime index.
+-- 基于私有运行时索引的只读公共查询
 local ast = require('vv-i18n.ast')
 local resolver = require('vv-i18n.resolver')
 local Index = require('vv-i18n.service.index')
@@ -6,9 +6,7 @@ local Index = require('vv-i18n.service.index')
 local M = {}
 
 local function buf_lang(bufnr)
-  local ft = vim.bo[bufnr].filetype
-  if ft == 'typescriptreact' or ft == 'javascriptreact' then return 'tsx' end
-  return ft == 'javascript' and 'javascript' or 'typescript'
+  return ast.lang_for_buffer(bufnr)
 end
 
 local function indexes(state, plugin)
@@ -49,7 +47,13 @@ end
 
 function M.tree(state, plugin)
   local out = {}
-  for _, source in ipairs(indexes(state, plugin)) do vim.list_extend(out, source.index:tree()) end
+  for source_index, source in ipairs(indexes(state, plugin)) do
+    for _, group in ipairs(source.index:tree()) do
+      group.source_id = source_index
+      group.writable = source.source.parse == nil
+      out[#out + 1] = group
+    end
+  end
   return out
 end
 
@@ -113,26 +117,192 @@ end
 
 local function collect_content(state, plugin, content, lang)
   local root = ast.parse_root(content, lang)
-  local hits, misses = {}, {}
-  for _, source in ipairs(indexes(state, plugin)) do
+  local calls = {}
+
+  -- ambiguous 结果契约：
+  -- { kind = 'ambiguous', range, row, literal, full_keys = string[],
+  --   candidates = { { full_key = string, source_ids = integer[] } },
+  --   source_ids = integer[], reason = string }
+  -- references/index 将 ambiguous 的每个可能全键记为精确保护证据，避免误删。
+
+  local function call_for(id, result)
+    local call = calls[id]
+    if not call then
+      call = {
+        row = result.range.srow,
+        range = result.range,
+        literal = result.literal,
+        observations = {},
+      }
+      calls[id] = call
+    end
+    return call
+  end
+
+  for source_id, source in ipairs(indexes(state, plugin)) do
     if source.index:any_keys() then
+      -- all_keys() 内部会排序；一个 source 在一次 buffer 扫描中只取一次。
+      local all_keys = source.index:all_keys()
+      local prefix_matches = {}
+      local function keys_with_prefix(prefix)
+        if prefix_matches[prefix] then return prefix_matches[prefix] end
+        local matched = {}
+        for _, full_key in ipairs(all_keys) do
+          if vim.startswith(full_key, prefix) then matched[#matched + 1] = full_key end
+        end
+        prefix_matches[prefix] = matched
+        return matched
+      end
+
       local opts = vim.tbl_extend('force', source.ropts, { lang = lang, root = root })
       for _, result in ipairs(resolver.collect_in_content(content, opts)) do
         local id = result.range.srow .. ':' .. result.range.scol
-        local per = source.index:get(result.full_key)
-        if per then
-          hits[id] = { row = result.range.srow, range = result.range, literal = result.literal,
-            full_key = result.full_key, kind = 'hit', per = per }
-        elseif not misses[id] and source.index:owns(result.full_key) then
-          misses[id] = { row = result.range.srow, range = result.range, literal = result.literal,
-            full_key = result.full_key, kind = 'missing' }
+        local call = call_for(id, result)
+        local per = result.full_key and source.index:get(result.full_key)
+        local observation = {
+          source_id = source_id,
+          result = result,
+          per = per,
+          owns = result.full_key and source.index:owns(result.full_key) or false,
+        }
+        call.observations[#call.observations + 1] = observation
+
+        if result.dynamic_prefix and result.dynamic_literal_prefix ~= '' then
+          local matched = keys_with_prefix(result.dynamic_prefix)
+          if #matched > 0 then
+            call.dynamic = call.dynamic or {}
+            local key = result.dynamic_prefix .. ':' .. source_id
+            call.dynamic[key] = {
+              row = result.range.srow,
+              range = result.range,
+              literal = result.literal,
+              prefix = result.dynamic_prefix,
+              pattern = result.dynamic_prefix .. '*',
+              kind = 'dynamic',
+              source_id = source_id,
+            }
+          end
+        end
+
+        if result.unsafe_dynamic then
+          call.unsafe_dynamic = call.unsafe_dynamic or {}
+          call.unsafe_dynamic[#call.unsafe_dynamic + 1] = observation
         end
       end
     end
   end
+
   local out = {}
-  for _, hit in pairs(hits) do out[#out + 1] = hit end
-  for id, miss in pairs(misses) do if not hits[id] then out[#out + 1] = miss end end
+
+  local function append_call(call)
+    local keys, by_key = {}, {}
+    local source_ids = {}
+    for _, observation in ipairs(call.observations) do
+      local result = observation.result
+      if result.full_key and not by_key[result.full_key] then
+        by_key[result.full_key] = { full_key = result.full_key, source_ids = {} }
+        keys[#keys + 1] = result.full_key
+      end
+      if result.full_key then
+        local owners = by_key[result.full_key].source_ids
+        if not owners[observation.source_id] then owners[observation.source_id] = true end
+      end
+      source_ids[observation.source_id] = true
+    end
+    table.sort(keys)
+
+    local unsafe = call.unsafe_dynamic and #call.unsafe_dynamic > 0
+    if unsafe then
+      -- references/index.lua 识别 dynamic 并把 '*' 交给 unused/model 作为全局保护。
+      local source_list = {}
+      for source_id in pairs(source_ids) do source_list[#source_list + 1] = source_id end
+      table.sort(source_list)
+      out[#out + 1] = {
+        row = call.row,
+        range = call.range,
+        literal = call.literal,
+        prefix = '',
+        pattern = '*',
+        kind = 'dynamic',
+        unsafe = true,
+        reason = 'unreliable-key',
+        source_ids = source_list,
+      }
+    elseif #keys > 1 then
+      local candidates = {}
+      for _, full_key in ipairs(keys) do
+        local item = by_key[full_key]
+        local ids = {}
+        for source_id in pairs(item.source_ids) do ids[#ids + 1] = source_id end
+        table.sort(ids)
+        candidates[#candidates + 1] = { full_key = full_key, source_ids = ids }
+      end
+      local ids = {}
+      for source_id in pairs(source_ids) do ids[#ids + 1] = source_id end
+      table.sort(ids)
+      out[#out + 1] = {
+        row = call.row,
+        range = call.range,
+        literal = call.literal,
+        kind = 'ambiguous',
+        reason = 'multiple-sources-resolved-different-keys',
+        full_keys = keys,
+        candidates = candidates,
+        source_ids = ids,
+      }
+    elseif #keys == 1 then
+      local full_key = keys[1]
+      local hit, owned
+      for _, observation in ipairs(call.observations) do
+        if observation.result.full_key == full_key then
+          if observation.per then hit = observation; break end
+          owned = owned or observation.owns
+        end
+      end
+      if hit then
+        out[#out + 1] = {
+          row = call.row,
+          range = call.range,
+          literal = hit.result.literal,
+          full_key = full_key,
+          kind = 'hit',
+          per = hit.per,
+          source_id = hit.source_id,
+        }
+      elseif owned then
+        local source_id
+        for id in pairs(by_key[full_key].source_ids) do source_id = id; break end
+        out[#out + 1] = {
+          row = call.row,
+          range = call.range,
+          literal = call.literal,
+          full_key = full_key,
+          kind = 'missing',
+          source_id = source_id,
+        }
+      end
+    end
+
+    if call.dynamic then
+      for _, dynamic in pairs(call.dynamic) do out[#out + 1] = dynamic end
+    end
+  end
+
+  local ordered = {}
+  for _, call in pairs(calls) do ordered[#ordered + 1] = call end
+  table.sort(ordered, function(a, b)
+    if a.row == b.row then return a.range.scol < b.range.scol end
+    return a.row < b.row
+  end)
+  for _, call in ipairs(ordered) do append_call(call) end
+
+  table.sort(out, function(a, b)
+    if a.row == b.row then
+      if a.range.scol == b.range.scol then return a.kind < b.kind end
+      return a.range.scol < b.range.scol
+    end
+    return a.row < b.row
+  end)
   return out
 end
 
@@ -142,16 +312,16 @@ function M.collect_buffer(state, plugin, bufnr)
 end
 
 function M.collect_content(state, plugin, content, path)
-  local extension = path:match('%.([^.]+)$')
-  local lang = (extension == 'tsx' or extension == 'jsx') and 'tsx'
-    or extension == 'js' and 'javascript' or 'typescript'
-  return collect_content(state, plugin, content, lang)
+  return collect_content(state, plugin, content, ast.lang_for_path(path))
 end
 
 function M.reference_names(state, plugin)
   local names, seen = {}, {}
   for _, source in ipairs(indexes(state, plugin)) do
     for name in pairs(source.ropts.t_functions or {}) do
+      if not seen[name] then seen[name] = true; names[#names + 1] = name end
+    end
+    for name in pairs(source.ropts.hook_names or {}) do
       if not seen[name] then seen[name] = true; names[#names + 1] = name end
     end
   end

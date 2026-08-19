@@ -1,4 +1,4 @@
--- Project discovery is pure policy; service owns the resulting runtime state.
+-- 项目发现只负责策略；service 持有最终的运行时状态
 local M = {}
 
 local project_file = '.vv-i18n.lua'
