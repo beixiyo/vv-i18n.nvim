@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.3] - 2026-08-19
+
+### Added
+
+- 新增 `:VVI18nUnused` 潜在无用 key 面板，支持逐项/批量复制审查材料及事务删除
+- 新增可配置引用 scanner adapter；内置 JS/TS scanner 与外部语言 scanner 共用统一证据契约
+- 动态模板、歧义调用和不可靠字符串转义会生成保护证据，避免把运行时 key 误判为可删除候选
+- 无用 key 复制内容支持自定义 renderer、定义语言选择、value 开关和紧凑中文 Markdown
+- keys、missing、references 与 unused 侧栏支持 `/` 实时筛选；可匹配 key、译文、文件路径与引用源码
+
+### Changed
+
+- 引用索引按 registry/store/scanner 职责拆分，全量与增量扫描统一 latest-wins 生命周期
+- editor 与 info 浮窗复用 `vv-utils.ui_window`，扫描过程复用 `vv-utils.loading`
+- locale 写回统一文件操作流程，并支持安全删除 JSON/JS/TS 对象 key
+- 树形侧栏快捷键提示改用 `vv-utils.tree_panel` 固定多行 toolbar：按宽度完整换行、独立滚动
+
 ## [0.1.2] - 2026-08-04
 
 ### Fixed

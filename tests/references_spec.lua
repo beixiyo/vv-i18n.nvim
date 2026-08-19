@@ -237,8 +237,9 @@ check('不同 key 共用引用侧栏宽度状态', vim.api.nvim_win_get_width(0)
   vim.api.nvim_win_get_width(0))
 panel_buf = vim.api.nvim_get_current_buf()
 local panel_win = vim.api.nvim_get_current_win()
-check('默认映射包含 jk/C-n/p、hl、Enter、gf 与 g?',
-  vim.fn.maparg('j', 'n', false, true).buffer == 1
+check('默认映射包含 /、jk/C-n/p、hl、Enter、gf 与 g?',
+  vim.fn.maparg('/', 'n', false, true).buffer == 1
+    and vim.fn.maparg('j', 'n', false, true).buffer == 1
     and vim.fn.maparg('k', 'n', false, true).buffer == 1
     and vim.fn.maparg('<C-N>', 'n', false, true).buffer == 1
     and vim.fn.maparg('<C-P>', 'n', false, true).buffer == 1

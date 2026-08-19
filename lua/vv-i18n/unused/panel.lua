@@ -7,6 +7,7 @@ local State = require('vv-utils.state')
 local TreePanel = require('vv-utils.tree_panel')
 local Loading = require('vv-utils.loading')
 local Actions = require('vv-i18n.unused.actions')
+local Filter = require('vv-i18n.filter')
 local Render = require('vv-i18n.unused.render')
 local References = require('vv-i18n.references.index')
 
@@ -33,6 +34,32 @@ local function create_panel(plugin, actions)
   local unsubscribe
   local panel_buf
   local stop_loading
+  local filter_query = ''
+  local filter_prompt
+
+  local function rebuild_view(query)
+    filter_query = query or ''
+    panel:refresh()
+  end
+
+  local function open_filter()
+    if not panel:is_open() then return end
+    local initial = filter_query
+    filter_prompt = Filter.open(panel.win, {
+      initial = initial,
+      filetype = 'vv-i18n-unused-filter',
+      label = 'Filter keys',
+      placeholder = 'type to filter keys…',
+      status = function()
+        if filter_query == '' then return '' end
+        local count = Render.match_count(actions.report, filter_query)
+        return count == 1 and '1 match' or string.format('%d matches', count)
+      end,
+      on_change = rebuild_view,
+      on_accept = rebuild_view,
+      on_cancel = function() rebuild_view(initial) end,
+    })
+  end
 
   local function sync_loading()
     local scanning = actions.report and actions.report.scan and actions.report.scan.status == 'scanning'
@@ -56,7 +83,10 @@ local function create_panel(plugin, actions)
     state = opts.state or panel_state,
     position = opts.position,
     help = opts.help,
-    source = function() return Render.nodes(actions.report) end,
+    toolbar = opts.render and opts.render.winbar ~= nil and nil or {
+      items = Render.toolbar,
+    },
+    source = function() return Render.nodes(actions.report, filter_query) end,
     open = function(node) jump(Render.item_of(node), panel) end,
     jump = function(node) jump(Render.item_of(node), panel) end,
     on_refresh = function()
@@ -71,6 +101,7 @@ local function create_panel(plugin, actions)
           x = { desc = 'Toggle selection', callback = function(ctx)
             actions:toggle(Render.candidate_of(ctx.node), ctx.panel)
           end },
+          ['/'] = { desc = 'Filter keys', callback = open_filter },
           c = { desc = 'Copy selected or current', callback = function(ctx)
             actions:copy(Render.item_of(ctx.node), false)
           end },
@@ -91,16 +122,22 @@ local function create_panel(plugin, actions)
       sync_loading()
     end,
     on_close = function()
+      if filter_prompt then filter_prompt.close(); filter_prompt = nil end
       if stop_loading then stop_loading(); stop_loading = nil end
       if unsubscribe then unsubscribe() end
       if active_panel == panel then active_panel = nil end
       if active_actions == actions then active_actions = nil end
     end,
     render = vim.tbl_extend('force', {
-      header = function() return Render.header(actions.report) end,
-      node = function(ctx) return Render.node(ctx, actions.selected) end,
-      empty = function() return Render.empty(actions.report) end,
-      winbar = Render.winbar,
+      header = function()
+        return Render.header(actions.report, filter_query, Render.match_count(actions.report, filter_query))
+      end,
+      node = function(ctx)
+        return Render.node(ctx, actions.selected, function(langs)
+          return plugin.preferred_lang(langs)
+        end)
+      end,
+      empty = function() return Render.empty(actions.report, filter_query) end,
     }, opts.render or {}),
   })
   panel:open()

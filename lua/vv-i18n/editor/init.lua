@@ -5,6 +5,7 @@
 local fields = require('vv-i18n.editor.fields')
 local model = require('vv-i18n.editor.model')
 local navigation = require('vv-i18n.editor.navigation')
+local Keys = require('vv-utils.keys')
 local UIWindow = require('vv-utils.ui_window')
 
 local M = {}
@@ -25,6 +26,22 @@ local M = {}
 
 ---@type VVI18nEditorState?
 local state = nil
+
+local function footer_chunks()
+  local chunks = { { ' ', 'FloatBorder' } }
+  for index, hint in ipairs({
+    { 'Jump', '<CR>' },
+    { 'Save', '<C-s>' },
+    { 'Next', '<Tab>' },
+    { 'Close', 'q' },
+  }) do
+    if index > 1 then chunks[#chunks + 1] = { '  ', 'FloatBorder' } end
+    chunks[#chunks + 1] = { hint[1] .. ' ', 'FloatBorder' }
+    chunks[#chunks + 1] = { Keys.display(hint[2]), 'Special' }
+  end
+  chunks[#chunks + 1] = { ' ', 'FloatBorder' }
+  return chunks
+end
 
 local function close()
   if state and state.close_window then state.close_window() end
@@ -206,7 +223,7 @@ function M.open(plugin, full_key, opts)
     border = 'rounded',
     title = ' 󰗊 ' .. full_key .. ' ',
     title_pos = 'center',
-    footer = ' Jump ↵ · Save ^s · Next ⇥ · Close q ',
+    footer = footer_chunks(),
     footer_pos = 'center',
     chrome = {
       winhighlight = 'Normal:NormalFloat,FloatBorder:FloatBorder',

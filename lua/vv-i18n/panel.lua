@@ -5,6 +5,7 @@
 
 local State = require('vv-utils.state')
 local TreePanel = require('vv-utils.tree_panel')
+local Filter = require('vv-i18n.filter')
 local Model = require('vv-i18n.panel.model')
 local Render = require('vv-i18n.panel.render')
 
@@ -20,6 +21,8 @@ local view = {
   selected_lang = nil,
   only_missing = false,
   group_by = 'mount',
+  filter_query = '',
+  filter_prompt = nil,
 }
 
 local function rebuild_tree()
@@ -35,7 +38,7 @@ local function make_nodes()
   return Model.nodes(view.tree, view.group_by, view.only_missing, {
     languages = view.languages,
     selected_lang = view.selected_lang,
-  })
+  }, view.filter_query)
 end
 
 local function focus_first_key(panel)
@@ -115,6 +118,26 @@ local function business_mappings()
         refresh(ctx.panel)
       end,
     },
+    ['/'] = {
+      desc = 'filter',
+      callback = function(ctx)
+        local initial = view.filter_query
+        view.filter_prompt = Filter.open(ctx.panel.win, {
+          initial = initial,
+          filetype = 'vv-i18n-keys-filter',
+          label = 'Filter keys',
+          placeholder = 'type to filter keys…',
+          status = function()
+            if view.filter_query == '' then return '' end
+            local count = Model.visible_total(view.tree, view.group_by, view.only_missing, view.filter_query)
+            return count == 1 and '1 match' or string.format('%d matches', count)
+          end,
+          on_change = function(query) view.filter_query = query; ctx.panel:refresh() end,
+          on_accept = function(query) view.filter_query = query; ctx.panel:refresh() end,
+          on_cancel = function() view.filter_query = initial; ctx.panel:refresh() end,
+        })
+      end,
+    },
     ['<LeftRelease>'] = {
       desc = 'click',
       callback = function(ctx)
@@ -145,6 +168,7 @@ local function help_options(configured)
     only_missing = { cat = 'View' },
     group_by_missing_lang = { cat = 'View' },
     reload = { cat = 'View' },
+    filter = { cat = 'View' },
     click = { cat = 'Mouse' },
   }, configured.actions or {})
   return options
@@ -164,6 +188,10 @@ local function create_panel(plugin)
     state = opts.state or panel_state,
     position = opts.position,
     help = help_options(opts.help),
+    toolbar = opts.render and opts.render.winbar ~= nil and nil or {
+      items = Render.toolbar,
+      label_hl = 'VVI18nPanelWinbar',
+    },
     source = make_nodes,
     render = render,
     open = function(node) open_node(node, panel) end,
@@ -182,11 +210,13 @@ local function create_panel(plugin)
       vim.wo[current.win].statusline = ' '
     end,
     on_close = function()
+      if view.filter_prompt then view.filter_prompt.close(); view.filter_prompt = nil end
       if active_panel == panel then active_panel = nil end
       view.plugin = nil
       view.source_tree = {}
       view.tree = {}
       view.languages = {}
+      view.filter_query = ''
     end,
   })
   return panel
@@ -199,6 +229,7 @@ function M.open(plugin, opts)
   view.plugin = plugin
   view.only_missing = opts.only_missing == true
   view.group_by = opts.group_by or 'mount'
+  view.filter_query = ''
   rebuild_tree()
 
   if active_panel and active_panel:is_open() then

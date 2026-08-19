@@ -107,12 +107,34 @@ vim.cmd('VVI18nUnused')
 local unused_buf = vim.api.nvim_get_current_buf()
 check('VVI18nUnused 打开潜在无用 key 面板', vim.bo[unused_buf].filetype == 'vv-i18n-unused')
 local unused_text = table.concat(vim.api.nvim_buf_get_lines(unused_buf, 0, -1, false), '\n')
-check('unused 快捷键帮助固定在 winbar 而非滚动内容', vim.wo[0].winbar:find('Select', 1, true) ~= nil
+local unused_toolbar_buf = vim.fn.bufnr('vv-tree-panel-toolbar://vv-i18n-unused')
+local unused_toolbar_text = unused_toolbar_buf > 0
+    and table.concat(vim.api.nvim_buf_get_lines(unused_toolbar_buf, 0, -1, false), '\n') or ''
+check('unused 快捷键帮助固定在独立 toolbar 而非滚动内容',
+  unused_toolbar_text:find('Filter /', 1, true) ~= nil
   and unused_text:find('x select', 1, true) == nil)
+check('unused 快捷键使用 vv-utils 图标并完整换行',
+  unused_toolbar_text:find('Copy all ⇧C', 1, true) ~= nil
+    and unused_toolbar_text:find('Delete all ⇧D', 1, true) ~= nil
+    and #vim.api.nvim_buf_get_lines(unused_toolbar_buf, 0, -1, false) > 1)
 local unused_maps = {}
 for _, map in ipairs(vim.api.nvim_buf_get_keymap(unused_buf, 'n')) do unused_maps[map.lhs] = true end
-check('unused 使用 c/C/d/D 复制和删除', unused_maps.c and unused_maps.C and unused_maps.d
-  and unused_maps.D and not unused_maps.a)
+check('unused 使用 / 过滤及 c/C/d/D 复制和删除', unused_maps['/'] and unused_maps.c
+  and unused_maps.C and unused_maps.d and unused_maps.D and not unused_maps.a)
+local start_unused_filter = vim.fn.maparg('/', 'n', false, true).callback
+start_unused_filter()
+local unused_filter_buf = vim.api.nvim_get_current_buf()
+check('unused / 打开 vv-utils 底部过滤输入框', vim.bo[unused_filter_buf].filetype == 'vv-i18n-unused-filter')
+vim.api.nvim_buf_set_lines(unused_filter_buf, 1, 2, false, { '__NO_UNUSED_MATCH__' })
+vim.api.nvim_exec_autocmds('TextChangedI', { buffer = unused_filter_buf })
+vim.wait(100, function()
+  return table.concat(vim.api.nvim_buf_get_lines(unused_buf, 0, -1, false), '\n')
+    :find("No matches for '__NO_UNUSED_MATCH__'", 1, true) ~= nil
+end, 10)
+local filtered_unused_text = table.concat(vim.api.nvim_buf_get_lines(unused_buf, 0, -1, false), '\n')
+check('unused 输入时实时过滤面板', filtered_unused_text:find(
+  "No matches for '__NO_UNUSED_MATCH__'", 1, true) ~= nil)
+vim.fn.maparg('<Esc>', 'i', false, true).callback()
 require('vv-i18n.unused.panel').close()
 check('lookup app.common.ok=确定', (i18n.lookup('app.common.ok') or {})['zh-CN']
   and i18n.lookup('app.common.ok')['zh-CN'].value == '确定')

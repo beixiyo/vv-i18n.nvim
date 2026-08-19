@@ -50,6 +50,17 @@ check('语言选择器标记当前语言',
   with_selector[1].children[3].data.selected == true
     and with_selector[1].children[3].data.lang == 'zh-CN')
 
+source[1].keys[1].per['zh-CN'].value = '确定'
+local queried = Model.nodes(source, 'mount', false, {
+  languages = languages,
+  selected_lang = 'zh-CN',
+}, '确定')
+check('key 筛选匹配译文并在筛选时隐藏语言选择器', #queried == 1
+  and queried[1].data.kind == 'group'
+  and #queried[1].children == 1
+  and queried[1].children[1].data.key.full == 'common.ok')
+check('key 筛选计数与节点投影一致', Model.visible_total(source, 'mount', false, '确定') == 1)
+
 local filtered = Model.nodes(source, 'mount', true)
 check('only_missing 过滤完整键',
   #filtered == 1

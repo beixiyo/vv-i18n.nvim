@@ -1,5 +1,5 @@
 -- vv-i18n editor(plan/diff/apply) + panel 渲染（ns-app fixture）
-dofile((debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')) .. '/bootstrap.lua')   -- 自定位 rtp
+dofile((debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')) .. '/bootstrap.lua') -- 自定位 rtp
 
 local SPEC_DIR = debug.getinfo(1, 'S').source:sub(2):match('(.*)/[^/]*$')
 local H = dofile(SPEC_DIR .. '/helper.lua')
@@ -100,6 +100,10 @@ local function find_map(buf, mode, lhs)
 end
 
 local joined = joined_panel()
+local toolbar_buf = vim.fn.bufnr('vv-tree-panel-toolbar://vv-i18n-keys')
+local function toolbar_text()
+  return table.concat(vim.api.nvim_buf_get_lines(toolbar_buf, 0, -1, false), '\n')
+end
 check('keys panel 复用 vv-utils tree-panel',
   vim.api.nvim_buf_get_name(pbuf) == 'vv-tree-panel://vv-i18n-keys',
   vim.api.nvim_buf_get_name(pbuf))
@@ -109,17 +113,22 @@ check('panel 含译文(Hero/英雄)', joined:find('Hero', 1, true) ~= nil or joi
 check('panel 标题含 i18n keys', joined:find('i18n keys', 1, true) ~= nil)
 check('panel 顶部包含真实语言选择器',
   joined:find('Languages', 1, true) ~= nil
-    and joined:find('● en-US', 1, true) ~= nil
-    and joined:find('[LANGUAGES', 1, true) == nil)
-local panel_winbar = vim.wo[0].winbar
-check('快捷键提示固定在顶部 winbar',
-  panel_winbar:find('h/l Fold', 1, true) ~= nil
-    and joined:find('h/l Fold', 1, true) == nil)
+  and joined:find('● en-US', 1, true) ~= nil
+  and joined:find('[LANGUAGES', 1, true) == nil)
+local panel_toolbar = toolbar_text()
+check('快捷键提示固定在顶部 toolbar',
+  panel_toolbar:find('Filter /', 1, true) ~= nil
+  and joined:find('Filter /', 1, true) == nil)
+check('keys 快捷键使用 vv-utils 图标且不使用点分隔',
+  panel_toolbar:find('Select/Edit ↵', 1, true) ~= nil
+  and panel_toolbar:find('<CR>', 1, true) == nil
+  and panel_toolbar:find('·', 1, true) == nil)
 check('panel 默认包含 C-n/C-p 导航',
   find_map(pbuf, 'n', '<C-N>') ~= nil and find_map(pbuf, 'n', '<C-P>') ~= nil)
 check('业务映射通过通用 mapping spec 提供帮助描述',
   find_map(pbuf, 'n', 'm').desc == 'vv-tree-panel: only_missing'
-    and find_map(pbuf, 'n', 'g').desc == 'vv-tree-panel: group_by_missing_lang')
+  and find_map(pbuf, 'n', 'g').desc == 'vv-tree-panel: group_by_missing_lang'
+  and find_map(pbuf, 'n', '/').desc == 'vv-tree-panel: filter')
 
 local zh_lnum = find_line('zh-CN')
 check('panel 找到 zh-CN 语言节点', zh_lnum ~= nil)
@@ -133,9 +142,30 @@ if zh_lnum then
   local switched_title = find_line('title')
   check('key 预览跟随切换为 zh-CN',
     switched_title
-      and panel_lines()[switched_title]:find('英雄', 1, true) ~= nil,
+    and panel_lines()[switched_title]:find('英雄', 1, true) ~= nil,
     switched_title and panel_lines()[switched_title])
 end
+
+check('keys panel / 打开底部过滤输入框', run_map('/'))
+local keys_filter_buf = vim.api.nvim_get_current_buf()
+check('keys 过滤输入框使用独立 filetype', vim.bo[keys_filter_buf].filetype == 'vv-i18n-keys-filter')
+vim.api.nvim_buf_set_lines(keys_filter_buf, 1, 2, false, { '__NO_KEY_MATCH__' })
+vim.api.nvim_exec_autocmds('TextChangedI', { buffer = keys_filter_buf })
+vim.wait(100, function()
+  return joined_panel():find("No matches for '__NO_KEY_MATCH__'", 1, true) ~= nil
+end, 10)
+check('keys 输入时实时过滤面板', joined_panel():find(
+  "No matches for '__NO_KEY_MATCH__'", 1, true) ~= nil)
+find_map(keys_filter_buf, 'i', '<Esc>').callback()
+
+vim.cmd('vertical resize 18')
+vim.api.nvim_exec_autocmds('WinResized', {})
+local narrow_toolbar_lines = vim.api.nvim_buf_get_lines(toolbar_buf, 0, -1, false)
+local narrow_toolbar = table.concat(narrow_toolbar_lines, '\n')
+check('keys panel 变窄后完整换成多行快捷键提示',
+  #narrow_toolbar_lines > 1
+  and narrow_toolbar:find('Select/Edit ↵', 1, true) ~= nil
+  and narrow_toolbar:find('Close q', 1, true) ~= nil)
 
 vim.cmd('vertical resize 48')
 vim.api.nvim_exec_autocmds('WinResized', {})
@@ -164,7 +194,7 @@ end
 
 vim.api.nvim_win_set_cursor(0, { vim.api.nvim_buf_line_count(pbuf), 0 })
 vim.cmd('normal! zt')
-check('滚动 keys 后固定快捷键提示仍存在', vim.wo[0].winbar == panel_winbar)
+check('滚动 keys 后固定快捷键提示仍存在', toolbar_text():find('Filter /', 1, true) ~= nil)
 
 check('panel g? 映射存在', run_map('g?'))
 local help_buf = vim.api.nvim_get_current_buf()
@@ -209,10 +239,12 @@ if missing_lnum then
   for _, chunk in ipairs(footer) do footer_text = footer_text .. (chunk[1] or '') end
   check('footer 使用快捷键符号', footer_text:find('Jump ↵', 1, true) ~= nil
     and footer_text:find('Save ^s', 1, true) ~= nil
-    and footer_text:find('<CR>', 1, true) == nil)
+    and footer_text:find('<CR>', 1, true) == nil
+    and footer[3] and footer[3][2] == 'Special')
 
   local editor_ns = vim.api.nvim_get_namespaces().vv_i18n_editor
-  local marks = vim.api.nvim_buf_get_extmarks(edit_buf, editor_ns, { ja_lnum - 1, 0 }, { ja_lnum - 1, -1 }, { details = true })
+  local marks = vim.api.nvim_buf_get_extmarks(edit_buf, editor_ns, { ja_lnum - 1, 0 }, { ja_lnum - 1, -1 },
+    { details = true })
   local label = marks[1] and marks[1][4].virt_text and marks[1][4].virt_text[1][1] or ''
   check('语言标签使用 overlay 虚拟文本', label:find('ja-JP', 1, true) ~= nil
     and edit_lines[ja_lnum]:find('ja-JP', 1, true) == nil)
@@ -315,7 +347,9 @@ if missing_lnum then
   local discard_rows = editor.plan(i18n, 'app.common.cancel')
   local discard_lnum
   for i, row in ipairs(discard_rows or {}) do
-    if row.lang == 'ja-JP' then discard_lnum = i; break end
+    if row.lang == 'ja-JP' then
+      discard_lnum = i; break
+    end
   end
   vim.api.nvim_buf_set_lines(discard_buf, discard_lnum - 1, discard_lnum, false, {
     string.rep(' ', value_col) .. 'discard me',

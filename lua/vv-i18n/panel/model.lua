@@ -4,6 +4,7 @@
 -- 本模块不持有窗口或面板状态，只把插件索引转换为 tree_panel 节点
 
 local M = {}
+local Filter = require('vv-i18n.filter')
 
 --- 生成无分隔符歧义的 opaque ID；调用方不得从 ID 反解业务字段
 ---@param kind string
@@ -18,13 +19,21 @@ local function node_id(kind, parts)
   return table.concat(encoded, ':')
 end
 
-local function visible_keys(group, group_by, only_missing)
-  if group_by == 'missing_lang' or not only_missing then return group.keys or {} end
-
+local function visible_keys(group, group_by, only_missing, query)
+  local source = group.keys or {}
   local keys = {}
-  for _, key in ipairs(group.keys or {}) do
-    if #(key.missing or {}) > 0 then keys[#keys + 1] = key end
+
+  for _, key in ipairs(source) do
+    local visible = group_by == 'missing_lang' or not only_missing or #(key.missing or {}) > 0
+    local fields = { key.full, key.rel, group.mount }
+    for lang, entry in pairs(key.per or {}) do
+      fields[#fields + 1] = lang
+      fields[#fields + 1] = entry.value
+      fields[#fields + 1] = entry.file
+    end
+    if visible and Filter.matches(fields, query) then keys[#keys + 1] = key end
   end
+
   return keys
 end
 
@@ -98,11 +107,12 @@ end
 ---@param group_by 'mount'|'missing_lang'
 ---@param only_missing boolean
 ---@param selector? { languages: string[], selected_lang?: string }
+---@param query? string
 ---@return VVTreePanelNode[]
-function M.nodes(tree, group_by, only_missing, selector)
+function M.nodes(tree, group_by, only_missing, selector, query)
   local nodes = {}
 
-  if selector and #selector.languages > 0 then
+  if selector and #selector.languages > 0 and vim.trim(query or '') == '' then
     local children = {}
     for _, lang in ipairs(selector.languages) do
       children[#children + 1] = {
@@ -131,8 +141,8 @@ function M.nodes(tree, group_by, only_missing, selector)
     local occurrence = (group_occurrences[occurrence_key] or 0) + 1
     group_occurrences[occurrence_key] = occurrence
 
-    local keys = visible_keys(group, group_by, only_missing)
-    if not (only_missing and #keys == 0) then
+    local keys = visible_keys(group, group_by, only_missing, query)
+    if #keys > 0 then
       local id = node_id('group', { group_by, group_name, occurrence })
       local children = {}
       for _, key in ipairs(keys) do
@@ -152,6 +162,25 @@ function M.nodes(tree, group_by, only_missing, selector)
     end
   end
   return nodes
+end
+
+---@param tree table[]
+---@param group_by 'mount'|'missing_lang'
+---@param only_missing boolean
+---@param query? string
+---@return integer
+function M.visible_total(tree, group_by, only_missing, query)
+  local total = 0
+  local seen = {}
+  for _, group in ipairs(tree or {}) do
+    for _, key in ipairs(visible_keys(group, group_by, only_missing, query)) do
+      if not seen[key.full] then
+        seen[key.full] = true
+        total = total + 1
+      end
+    end
+  end
+  return total
 end
 
 ---@param tree? table[]

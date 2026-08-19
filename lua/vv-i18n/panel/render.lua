@@ -98,34 +98,49 @@ local function render_node(view, ctx)
   }
 end
 
+function M.toolbar()
+  return {
+    { label = 'Fold', key = 'h/l' },
+    { label = 'Filter', key = '/' },
+    { label = 'Select/Edit', key = '<CR>' },
+    { label = 'Edit', key = 'e' },
+    { label = 'Miss', key = 'm' },
+    { label = 'Group', key = 'g' },
+    { label = 'Help', key = 'g?' },
+    { label = 'Close', key = 'q' },
+  }
+end
+
 ---@param view table
 ---@return VVTreePanelRenderers
 function M.defaults(view)
   return {
-    winbar = function()
-      return {
-        text = 'h/l Fold  <CR> Select/Edit  e Edit  m Miss  g Group  g? Help  q Close',
-        hl = 'VVI18nPanelWinbar',
-      }
-    end,
     header = function()
       local total, missing = Model.summary(view.tree)
       local mode = view.group_by == 'missing_lang' and ' · by missing lang' or ''
       local filter = view.only_missing and ' · missing only' or ''
       local language = view.selected_lang and (' · ' .. view.selected_lang) or ''
+      local query = view.filter_query ~= '' and (' · /' .. view.filter_query) or ''
+      local visible = Model.visible_total(view.tree, view.group_by, view.only_missing, view.filter_query)
+      local key_count = view.filter_query ~= ''
+          and ('%d/%d keys'):format(visible, total)
+        or ('%d keys'):format(total)
       return {
         chunks = {
           { '  󰗊  ', 'VVI18nPanelTitle' },
           { 'i18n keys', 'VVI18nPanelTitle' },
         },
         virt_text = {
-          { ('%d keys · %d groups · %d missing%s%s%s')
-            :format(total, #(view.tree or {}), missing, mode, filter, language), 'VVI18nPanelCount' },
+          { ('%s · %d groups · %d missing%s%s%s%s')
+            :format(key_count, #(view.tree or {}), missing, mode, filter, language, query), 'VVI18nPanelCount' },
         },
       }
     end,
     node = function(ctx) return render_node(view, ctx) end,
     empty = function()
+      if view.filter_query ~= '' then
+        return { text = ("  No matches for '%s'"):format(view.filter_query), hl = 'VVI18nPanelEmpty' }
+      end
       return {
         text = '  (No keys. Run :VVI18nReload to rebuild the index.)',
         hl = 'VVI18nPanelEmpty',

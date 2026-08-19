@@ -3,6 +3,7 @@
 -- 替代 notify 长文本：译文进入可聚焦浮窗，方便滚动、复制，并可用 e/<CR> 跳到
 -- 既有多语言编辑器
 local hl = require('vv-utils.hl')
+local Keys = require('vv-utils.keys')
 local UIWindow = require('vv-utils.ui_window')
 local entry_value = require('vv-i18n.util').entry_value
 
@@ -85,9 +86,26 @@ local function build_lines(plugin, full_key, per, note)
   end
 
   lines[#lines + 1] = ''
-  local footer = '  e/<CR> Edit · r Reload · y Copy · q Close'
+  local footer_parts = {
+    { 'Edit', Keys.display('e') .. '/' .. Keys.display('<CR>') },
+    { 'Reload', Keys.display('r') },
+    { 'Copy', Keys.display('y') },
+    { 'Close', Keys.display('q') },
+  }
+  local footer = '  '
+  local key_ranges = {}
+  for index, part in ipairs(footer_parts) do
+    if index > 1 then footer = footer .. '  ' end
+    footer = footer .. part[1] .. ' '
+    local start_col = #footer
+    footer = footer .. part[2]
+    key_ranges[#key_ranges + 1] = { start_col, #footer }
+  end
   lines[#lines + 1] = footer
   add_hl(#lines - 1, 0, #footer, 'VVI18nInfoFooter')
+  for _, range in ipairs(key_ranges) do
+    add_hl(#lines - 1, range[1], range[2], 'Special')
+  end
 
   return lines, hls
 end
