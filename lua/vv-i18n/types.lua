@@ -21,6 +21,7 @@
 ---@field namespace string|function  全局默认 namespace @default 'hook-arg'
 ---@field namespace_separator string  绝对命名空间 ns<sep>key @default ':'
 ---@field key_separator string   全键各段连接符 @default '.'
+---@field ignore_key? fun(full_key: string): boolean  参数为含 source prefix 与 namespace 的完整 key；返回真值时从索引、引用与光标操作排除；抛错记入 errors 并按不忽略处理 @default nil
 ---@field quote_style 'single'|'double'|'auto'  写回引号 @default 'auto'
 ---@field indent? string         写回缩进；nil=推断 @default nil
 ---@field display VVI18nDisplayConfig
@@ -38,6 +39,7 @@
 ---@field value string           string→真实值；其它→原始文本
 ---@field row integer            值起点行（0-based，跳转用）
 ---@field col integer            值起点列（0-based）
+---@field key_range? {srow: integer, scol: integer, erow: integer, ecol: integer}  key 节点范围（0-based，定义位置光标操作用）
 
 ---@class VVI18nDisplayConfig
 ---@field enable boolean         @default true
@@ -76,7 +78,9 @@
 ---@class VVI18nReferencesConfig
 ---@field enable boolean         扫描项目引用并在定义处显示计数 @default true
 ---@field icon string            定义处引用数图标 @default '󰗊 '
----@field hl string              定义处引用数高亮 @default 'Comment'
+---@field hl string              定义处引用数图标与文字高亮 @default 'Comment'
+---@field count_hl string        定义处引用数数字高亮组 @default 'VVI18nReferenceCount'
+---@field count_style? vim.api.keyset.highlight  数字样式；nil=主题 Statement 前景色向 Normal 背景混 30%，不加粗 @default nil
 ---@field jump_single boolean    单个引用时直接跳转，不打开侧栏 @default false
 ---@field show_zero boolean      是否显示零引用虚拟文本 @default false
 ---@field render? fun(ctx: table): (string|table[]|nil)  定义处虚拟文本自定义渲染

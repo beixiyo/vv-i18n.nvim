@@ -153,10 +153,23 @@ local function index_file(path, root, request, registry)
   state.scan.parsed = state.scan.parsed + 1
 
   local refs, dynamic_refs = {}, {}
+  -- ignore_key 与 scanner.collect 同级：抛错记为本文件的 failure（只记一次），该 key 按不忽略处理，不中断扫描
+  local ignore_failed = false
+  local function is_ignored(full_key)
+    if registry.ignore_key == nil then return false end
+    local ok, result = pcall(registry.ignore_key, full_key)
+    if ok then return result and true or false end
+    if not ignore_failed then
+      ignore_failed = true
+      add_failure(request, { file = path, reason = 'ignore-key-error', detail = tostring(result), scanner = scanner.id })
+    end
+    return false
+  end
+
   for _, result in ipairs(results) do
     if not is_current(request) then return false end
 
-    if result.kind == 'hit' then
+    if result.kind == 'hit' and not is_ignored(result.full_key) then
       local ref = {
         full_key = result.full_key,
         literal = result.literal,
@@ -180,17 +193,19 @@ local function index_file(path, root, request, registry)
       }
     elseif result.kind == 'ambiguous' then
       for _, full_key in ipairs(result.full_keys or {}) do
-        dynamic_refs[#dynamic_refs + 1] = {
-          pattern = full_key,
-          prefix = full_key,
-          literal = result.literal,
-          reason = result.reason,
-          file = path,
-          relative = relative(path, root),
-          row = result.range.srow + 1,
-          col = result.range.scol,
-          line = vim.trim(lines[result.range.srow + 1] or ''),
-        }
+        if not is_ignored(full_key) then
+          dynamic_refs[#dynamic_refs + 1] = {
+            pattern = full_key,
+            prefix = full_key,
+            literal = result.literal,
+            reason = result.reason,
+            file = path,
+            relative = relative(path, root),
+            row = result.range.srow + 1,
+            col = result.range.scol,
+            line = vim.trim(lines[result.range.srow + 1] or ''),
+          }
+        end
       end
     end
   end

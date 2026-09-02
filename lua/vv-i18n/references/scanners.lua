@@ -158,6 +158,7 @@ function M.build(plugin)
   return {
     extensions = extensions,
     names = names,
+    ignore_key = type(config.ignore_key) == 'function' and config.ignore_key or nil,
     for_path = function(path)
       for _, extension in ipairs(route_extensions) do
         if vim.endswith(path, '.' .. extension) then return by_extension[extension], extension end

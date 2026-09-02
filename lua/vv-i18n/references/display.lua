@@ -8,9 +8,14 @@ local enabled = false
 local unsubscribe
 local augroup
 
+--- 默认渲染：图标与文字用 ctx.hl，数字单独用 ctx.count_hl 突出
 local function default_chunks(ctx)
   local label = ctx.count == 1 and 'reference' or 'references'
-  return { { ('%s%d %s'):format(ctx.icon, ctx.count, label), ctx.hl } }
+  return {
+    { ctx.icon, ctx.hl },
+    { tostring(ctx.count), ctx.count_hl },
+    { ' ' .. label, ctx.hl },
+  }
 end
 
 local function render_buffer(bufnr)
@@ -39,6 +44,7 @@ local function render_buffer(bufnr)
           count = count,
           icon = config.icon,
           hl = config.hl,
+          count_hl = config.count_hl,
         }
 
         local chunks = config.render and config.render(ctx) or nil

@@ -61,6 +61,7 @@ function M.reload(state, plugin)
       dirs = source_dirs(source, state.root),
       prefix = source.prefix,
       key_separator = state.config.key_separator,
+      ignore_key = state.config.ignore_key,
       mount = source.mount,
       lang = source.lang,
       parse = source.parse,

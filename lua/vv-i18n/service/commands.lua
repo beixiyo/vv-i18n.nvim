@@ -47,24 +47,36 @@ end
 
 function M.add_key(plugin)
   local result = plugin.resolve_cursor()
+  if result.reason == 'ignored-key' then
+    return notify('光标处 i18n 键已被 ignore_key 忽略', vim.log.levels.WARN)
+  end
+
   local function add(full_key)
     local files, error = plugin.files_for(full_key)
+
     if not files then return notify('无法定位文件：' .. tostring(error), vim.log.levels.WARN) end
     local missing = {}
+
     for _, file in ipairs(files) do if not file.exists then missing[#missing + 1] = file end end
+
     if #missing == 0 then return notify('该键各语言均已存在') end
+
     vim.ui.input({ prompt = ('补 %s（%d 个语言缺失）值: '):format(full_key, #missing) }, function(input)
       if input == nil or input == '' then return end
       local done, failures = 0, {}
+
       for _, file in ipairs(missing) do
         local write = writer.add_file(file.file, file.in_file_path, input, plugin.writer_opts())
         if write.ok then done = done + 1 else failures[#failures + 1] = file.lang .. ':' .. (write.reason or '?') end
       end
+
       notify(('已补 %d 个语言%s'):format(done, #failures > 0 and ('，失败: ' .. table.concat(failures, ', ')) or ''))
       plugin.reload()
     end)
   end
+
   if result.ok then return add(result.full_key) end
+
   vim.ui.input({ prompt = '要新增的全键: ' }, function(input)
     if input and input ~= '' then add(input) end
   end)
@@ -82,10 +94,12 @@ function M.open_references(plugin)
   local panel = require('vv-i18n.references.panel')
   local references = require('vv-i18n.references.index')
   local resolved = plugin.resolve_cursor()
-  local full_key = resolved.ok and resolved.full_key or plugin.definition_at_cursor()
-  if not full_key then return notify('No i18n key under cursor', vim.log.levels.WARN) end
 
+  if not resolved.ok then return notify('No i18n key under cursor', vim.log.levels.WARN) end
+
+  local full_key = resolved.full_key
   local items = references.get(full_key)
+
   if plugin.get_config().references.jump_single and #items == 1 then
     panel.close()
     require('vv-i18n.references.navigation').jump(items[1])
@@ -100,6 +114,7 @@ end
 
 function M.edit_cursor(plugin)
   local result = plugin.resolve_cursor()
+
   if not result.ok then return notify('光标处无 i18n 键：' .. (result.reason or '?'), vim.log.levels.WARN) end
   require('vv-i18n.editor').open(plugin, result.full_key, {
     target_win = vim.api.nvim_get_current_win(),
@@ -109,6 +124,7 @@ end
 
 function M.notify_reload(state)
   local keys = 0
+
   for _, source in ipairs(state.indexes or {}) do keys = keys + source.index:stats().keys end
   notify(('索引已重建：%d 源 / %d 键%s'):format(#(state.indexes or {}), keys,
     #state.errors > 0 and ('，%d 文件解析失败'):format(#state.errors) or ''))

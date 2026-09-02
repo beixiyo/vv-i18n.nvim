@@ -171,6 +171,7 @@ require('vv-i18n').setup({
   namespace = 'hook-arg',
   namespace_separator = ':',
   key_separator = '.',
+  ignore_key = nil,                    -- function(full_key) -> boolean；返回真值会在所有功能中排除该 key
   quote_style = 'auto',                -- 'single' | 'double' | 'auto'
   indent = nil,                        -- nil：从目标文件推断
   display = {
@@ -198,7 +199,9 @@ require('vv-i18n').setup({
   references = {
     enable = true,
     icon = '󰗊 ',
-    hl = 'Comment',
+    hl = 'Comment',                    -- 图标与文字高亮
+    count_hl = 'VVI18nReferenceCount', -- 数字高亮组
+    count_style = nil,                 -- nil：主题 `Statement` 前景色向背景混 30%（柔和、不加粗）；或 { fg = '#f5c2e7' }
     jump_single = false,               -- 只有一个引用时直接跳转
     show_zero = false,                 -- 显示零引用虚拟文本
     render = nil,                      -- 自定义定义处引用数
@@ -234,6 +237,17 @@ require('vv-i18n').setup({
   project_config = true,               -- 加载可信的 .vv-i18n.lua
   parse = nil,                         -- 自定义读侧解析器
 })
+```
+
+`ignore_key` 收到的是**完整 key**，包含 source `prefix` 与 namespace（例如 `app.common._draft`），因此按 key 名做规则时应逐段匹配，而不是匹配整串。返回真值的 key 会从定义索引、引用索引、面板、unused 分析、光标操作和写入定位中排除；回调抛错会记入索引 errors 或扫描 failures，该 key 按不忽略处理。例如，忽略任一段以 `_` 开头的 key：
+
+```lua
+ignore_key = function(full_key)
+  for segment in full_key:gmatch('[^.]+') do
+    if vim.startswith(segment, '_') then return true end
+  end
+  return false
+end
 ```
 
 ### 自定义 `display.render`
@@ -289,19 +303,22 @@ parse = function(content, path)
 end
 ```
 
-- 返回 `{ leaves = VVI18nLeaf[], top_keys? }`;`leaf = { path=string[], dotted, kind='string', value, row, col }`(`row/col` 0-based,供跳转)
+- 返回 `{ leaves = VVI18nLeaf[], top_keys? }`;`leaf = { path=string[], dotted, kind='string', value, row, col, key_range? }`(`row/col` 0-based,供跳转)
+- `key_range = { srow, scol, erow, ecol }`(0-based、end-exclusive)可选:提供时光标命令按 key 节点精确定位定义;缺省时退化为按值起始行匹配
 - **仅读侧**。写回（`:VVI18nEdit` / `AddKey` / `SetValue`）仍是 tree-sitter 字节段引擎,对自定义格式不可用
 
 ## 命令
+
+所有依赖光标位置的命令都同时支持翻译调用点和 locale key 定义位置
 
 | 命令                               | 作用                           |
 | ---------------------------------- | ------------------------------ |
 | `:VVI18nKeys`                      | 键浏览 / 完整度 / 同步编辑面板 |
 | `:VVI18nMissing`                   | 仅缺失 key，按缺失语言分组     |
-| `:VVI18nReferences`                | 打开当前 key 的可折叠引用侧栏  |
+| `:VVI18nReferences`                | 打开光标处调用或定义的引用侧栏 |
 | `:VVI18nUnused`                    | 潜在无用 key 核查/复制/删除面板 |
-| `:VVI18nEdit`                      | 光标处键的多语言同步编辑浮窗   |
-| `:VVI18nInfo`                      | 光标处键各语言译文             |
+| `:VVI18nEdit`                      | 光标处调用或定义的同步编辑浮窗 |
+| `:VVI18nInfo`                      | 光标处调用或定义的各语言译文   |
 | `:VVI18nJump`                      | 跳到 locale 定义               |
 | `:VVI18nSetValue`                  | 改某语言值（单语言快速）       |
 | `:VVI18nAddKey`                    | 补缺失语言                     |

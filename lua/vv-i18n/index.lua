@@ -53,6 +53,7 @@ end
 ---@field prefix string
 ---@field key_sep string
 ---@field mount_kind string
+---@field ignore_key? fun(full_key: string): boolean
 ---@field mounts table<string, { langs: string[], files: table<string, string> }>
 ---@field keys table<string, table<string, table>>
 ---@field langs string[]
@@ -94,6 +95,13 @@ function Index:get(full_key)
   return self.keys[full_key]
 end
 
+--- 判断完整 key 是否被调用方策略排除。策略已在 build 时包装为不抛错的判定
+---@param full_key string
+---@return boolean
+function Index:is_ignored(full_key)
+  return self.ignore_key ~= nil and self.ignore_key(full_key)
+end
+
 --- 本索引是否含任意键（早退，不数全量）
 ---@return boolean
 function Index:any_keys()
@@ -105,6 +113,7 @@ end
 ---@param full_key string
 ---@return boolean
 function Index:owns(full_key)
+  if self:is_ignored(full_key) then return false end
   local mount_key = self:decompose(full_key)
   return mount_key ~= nil and self.mounts[mount_key] ~= nil
 end
@@ -114,6 +123,7 @@ end
 ---@return { lang: string, file: string, in_file_path: string[], exists: boolean }[]?
 ---@return string? err
 function Index:resolve_files_for_key(full_key)
+  if self:is_ignored(full_key) then return nil, 'ignored-key' end
   local mount_key, in_file_path = self:decompose(full_key)
   if not mount_key then return nil, 'bad-prefix' end
   local mount = self.mounts[mount_key]
@@ -135,6 +145,7 @@ end
 
 --- 某全键在其挂载点内缺失的语言
 function Index:missing(full_key)
+  if self:is_ignored(full_key) then return {} end
   local mount_key = self:decompose(full_key)
   local mount = mount_key and self.mounts[mount_key]
   if not mount then return {} end
@@ -211,8 +222,21 @@ local function file_namespace(mount, ctx)
   return ctx.ns or stem_of(ctx.path)   -- 'filename'
 end
 
+--- 把调用方的 ignore_key 策略包装为不抛错的判定：真值即忽略，抛错交给 on_error 并视为不忽略
+---@param fn fun(full_key: string): boolean
+---@param on_error fun(full_key: string, err: any)
+---@return fun(full_key: string): boolean
+local function safe_ignore(fn, on_error)
+  return function(full_key)
+    local ok, result = pcall(fn, full_key)
+    if ok then return result and true or false end
+    on_error(full_key, result)
+    return false
+  end
+end
+
 --- 构建索引（一个 source 一个 index）
----@param opts { dirs: string[], prefix?: string, key_separator?: string, mount?: any, lang?: any, parse?: fun(content: string, path: string): table? }
+---@param opts { dirs: string[], prefix?: string, key_separator?: string, mount?: any, lang?: any, ignore_key?: (fun(full_key: string): boolean), parse?: (fun(content: string, path: string): table?) }
 ---@return VVI18nIndex index
 ---@return table[] errors  解析失败清单（不静默吞）
 function M.build(opts)
@@ -223,6 +247,19 @@ function M.build(opts)
   local mount_kind = type(mount) == 'function' and 'fn' or mount
   local lang_matcher = tmpl.compile(opts.lang or { '{lang}.ts', '{lang}.tsx', '{lang}.js', '{lang}.json' })
   local custom_parse = opts.parse   -- 自定义读侧解析（YAML/PO 等）：fn(content, path) -> { top_keys?, leaves }
+  local errors = {}
+
+  -- ignore_key 抛错与 parse 抛错同级处理：记入 errors（同一文件同一错误只记一次），不中断构建
+  -- 构建结束后 current 为 nil，查询期没有错误通道，抛错一律按“不忽略”处理
+  local current
+  local ignore_error_seen = {}
+  local ignore_key = type(opts.ignore_key) == 'function' and safe_ignore(opts.ignore_key, function(_, err)
+    if not current then return end
+    local id = current.file .. '\0' .. tostring(err)
+    if ignore_error_seen[id] then return end
+    ignore_error_seen[id] = true
+    errors[#errors + 1] = { dir = current.dir, lang = current.lang, file = current.file, reason = 'ignore-key-error:' .. tostring(err) }
+  end) or nil
 
   -- 解析一个 locale 文件：有自定义 parse 就用它，否则默认 tree-sitter
   local function parse_one(path)
@@ -244,12 +281,12 @@ function M.build(opts)
     prefix = prefix,
     key_sep = key_sep,
     mount_kind = mount_kind,
+    ignore_key = ignore_key,
     keys = {},
     mounts = {},
     langs = {},
   }, Index)
 
-  local errors = {}
   local lang_set = {}
   local object_entries = {}
 
@@ -286,6 +323,7 @@ function M.build(opts)
       variants = entry.variants,
       row = entry.row,
       col = entry.col,
+      key_range = entry.key_range,
     }
   end
 
@@ -298,6 +336,7 @@ function M.build(opts)
           errors[#errors + 1] = { dir = dir, lang = matched.lang, file = f.path, reason = res.reason }
         else
           local lang = matched.lang
+          current = { dir = dir, lang = lang, file = f.path }
           lang_set[lang] = true
           -- ns 仅 filename / 函数 布局需要（top-key 走顶层 key、flat 无 ns）
           local ns
@@ -313,23 +352,28 @@ function M.build(opts)
 
           for _, leaf in ipairs(res.leaves) do
             local full = full_key_for(leaf, ns)
-            local per = self.keys[full]
-            if not per then per = {}; self.keys[full] = per end
-            per[lang] = indexed_entry(leaf, f.path)
+            if not self:is_ignored(full) then
+              local per = self.keys[full]
+              if not per then per = {}; self.keys[full] = per end
+              per[lang] = indexed_entry(leaf, f.path)
+            end
           end
 
           -- 普通对象本身不进入 key 列表；只有同路径在其它语言是翻译值时，才用于补齐
           -- per，表示该语言并非缺失，而是该路径已被对象占用
           for _, object in ipairs(res.objects or {}) do
             local full = full_key_for(object, ns)
-            local per = object_entries[full]
-            if not per then per = {}; object_entries[full] = per end
-            per[lang] = indexed_entry(object, f.path)
+            if not self:is_ignored(full) then
+              local per = object_entries[full]
+              if not per then per = {}; object_entries[full] = per end
+              per[lang] = indexed_entry(object, f.path)
+            end
           end
         end
       end
     end
   end
+  current = nil
 
   for full, per in pairs(self.keys) do
     for lang, entry in pairs(object_entries[full] or {}) do

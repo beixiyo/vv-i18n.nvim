@@ -7,6 +7,7 @@
 --   * kind     'string' | 'plural' | 'array' | 'other'
 --   * value    string 类型时为解码后真实值；否则为原始文本
 --   * row/col  值节点 0-based 起点 —— 供跳转
+--   * key_range key 节点 0-based 范围 —— 供定义位置光标操作
 --
 -- 复数对象（one/other/zero/two/few/many）是一个翻译值，不是普通命名空间。它作为
 -- plural 条目进入索引，variants 保留各形态供 editor 展开编辑，避免把父 key 误报缺失
@@ -25,6 +26,14 @@ local plural_forms = {
   many = true,
   other = true,
 }
+
+---@param node TSNode
+---@return { srow: integer, scol: integer, erow: integer, ecol: integer }
+local function node_range(node)
+  local srow, scol = node:start()
+  local erow, ecol = node:end_()
+  return { srow = srow, scol = scol, erow = erow, ecol = ecol }
+end
 
 --- 判定值节点类型并取出可用信息
 ---@param vnode TSNode
@@ -97,6 +106,7 @@ local function collect(obj, content, prefix, leaves, objects)
     local vnode = pair:field('value')[1]
     if knode and vnode then
       local key = ast.strip_quotes(ast.node_text(knode, content))
+      local key_range = node_range(knode)
       prefix[#prefix + 1] = key
       if vnode:type() == 'object' then
         local variants = plural_variants(vnode, content, prefix)
@@ -111,6 +121,7 @@ local function collect(obj, content, prefix, leaves, objects)
             variants = variants,
             row = row,
             col = col,
+            key_range = key_range,
           }
         else
           objects[#objects + 1] = {
@@ -120,6 +131,7 @@ local function collect(obj, content, prefix, leaves, objects)
             value = ast.node_text(vnode, content),
             row = row,
             col = col,
+            key_range = key_range,
           }
           collect(vnode, content, prefix, leaves, objects)
         end
@@ -134,6 +146,7 @@ local function collect(obj, content, prefix, leaves, objects)
           value = value,
           row = row,
           col = col,
+          key_range = key_range,
         }
       end
       prefix[#prefix] = nil

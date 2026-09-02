@@ -119,14 +119,20 @@ local marks = vim.api.nvim_buf_get_extmarks(
 )
 local count_text
 local zero_text
+local count_chunk_hl
 for _, mark in ipairs(marks) do
   local chunks = mark[4].virt_text or {}
+  local text = {}
   for _, chunk in ipairs(chunks) do
-    if chunk[1]:find('2 references', 1, true) then count_text = chunk[1] end
-    if chunk[1]:find('0 references', 1, true) then zero_text = chunk[1] end
+    text[#text + 1] = chunk[1]
+    if chunk[1] == '2' then count_chunk_hl = chunk[2] end
   end
+  text = table.concat(text)
+  if text:find('2 references', 1, true) then count_text = text end
+  if text:find('0 references', 1, true) then zero_text = text end
 end
 check('定义处显示引用数虚拟文本', count_text ~= nil, count_text)
+check('引用数数字使用独立的 count_hl 高亮组', count_chunk_hl == 'VVI18nReferenceCount', count_chunk_hl)
 check('默认不显示零引用虚拟文本', zero_text == nil, zero_text)
 
 local source_buf = vim.fn.bufadd(H.fixture('ns-app/src/pages/Home.tsx'))
@@ -299,9 +305,9 @@ for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(
   -1,
   { details = true }
 )) do
-  for _, chunk in ipairs(mark[4].virt_text or {}) do
-    if chunk[1]:find('0 references', 1, true) then zero_visible = true end
-  end
+  local text = {}
+  for _, chunk in ipairs(mark[4].virt_text or {}) do text[#text + 1] = chunk[1] end
+  if table.concat(text):find('0 references', 1, true) then zero_visible = true end
 end
 check('show_zero=true 显示零引用虚拟文本', zero_visible == true)
 

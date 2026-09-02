@@ -11,6 +11,7 @@ local function index_inputs(config)
     'project_config',
     'sources',
     'key_separator',
+    'ignore_key',
     'namespace_separator',
     'lang',
     'mount',

@@ -12,6 +12,7 @@ local defaults = {
   namespace = 'hook-arg',
   namespace_separator = ':',
   key_separator = '.',
+  ignore_key = nil,
   quote_style = 'auto',
   indent = nil,
   display = {
@@ -40,6 +41,8 @@ local defaults = {
     enable = true,
     icon = '󰗊 ',
     hl = 'Comment',
+    count_hl = 'VVI18nReferenceCount',  -- 引用数数字高亮组
+    count_style = nil,                  -- 直接定义数字样式 { fg=, bold= }；nil=默认(主题 Statement 前景色向背景混 30%，不加粗)
     jump_single = false,
     show_zero = false,
     render = nil,

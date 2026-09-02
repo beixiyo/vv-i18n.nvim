@@ -174,6 +174,7 @@ require('vv-i18n').setup({
   namespace = 'hook-arg',
   namespace_separator = ':',
   key_separator = '.',
+  ignore_key = nil,                    -- function(full_key) -> boolean; a truthy result excludes the key everywhere
   quote_style = 'auto',                -- 'single' | 'double' | 'auto'
   indent = nil,                        -- nil: infer from the target file
   display = {
@@ -201,7 +202,9 @@ require('vv-i18n').setup({
   references = {
     enable = true,
     icon = '󰗊 ',
-    hl = 'Comment',
+    hl = 'Comment',                    -- Icon and label highlight
+    count_hl = 'VVI18nReferenceCount', -- Highlight group for the number
+    count_style = nil,                 -- nil: theme `Statement` foreground softened 30% toward the background; or { fg = '#f5c2e7' }
     jump_single = false,               -- Jump directly when exactly one reference exists
     show_zero = false,                 -- Show zero-reference virtual text
     render = nil,                      -- Definition reference-count renderer
@@ -237,6 +240,17 @@ require('vv-i18n').setup({
   project_config = true,               -- Load a trusted .vv-i18n.lua
   parse = nil,                         -- Custom read-side parser
 })
+```
+
+`ignore_key` receives the **fully qualified key**, including the source `prefix` and namespace (for example `app.common._draft`), so match segments rather than the whole string when the rule is about key names. A truthy result excludes the key from the definition index, reference index, panels, unused analysis, cursor commands, and write targeting. If the callback throws, the error is recorded in the index errors or scan failures and the key is treated as not ignored. For example, ignore every key whose segment starts with `_`:
+
+```lua
+ignore_key = function(full_key)
+  for segment in full_key:gmatch('[^.]+') do
+    if vim.startswith(segment, '_') then return true end
+  end
+  return false
+end
 ```
 
 ### Custom `display.render`
@@ -289,18 +303,20 @@ parse = function(content, path)
 end
 ```
 
-Return `{ leaves = VVI18nLeaf[], top_keys? }`, where each leaf is `{ path=string[], dotted, kind='string', value, row, col }`; `row` and `col` are zero-based definition positions. This hook is **read-only**. Write operations such as `:VVI18nEdit`, `:VVI18nAddKey`, and `:VVI18nSetValue` still use the treesitter byte-range engine and are unavailable for custom formats.
+Return `{ leaves = VVI18nLeaf[], top_keys? }`, where each leaf is `{ path=string[], dotted, kind='string', value, row, col, key_range? }`; `row` and `col` are zero-based definition positions. `key_range = { srow, scol, erow, ecol }` (zero-based, end-exclusive) is optional: when present, cursor commands resolve the definition precisely from the key node; when absent, they fall back to matching the line where the value starts. This hook is **read-only**. Write operations such as `:VVI18nEdit`, `:VVI18nAddKey`, and `:VVI18nSetValue` still use the treesitter byte-range engine and are unavailable for custom formats.
 
 ## Commands
+
+Cursor-scoped commands accept either a translation call or a locale key definition.
 
 | Command | Action |
 |---------|--------|
 | `:VVI18nKeys` | Browse keys, inspect completeness, and synchronize values |
 | `:VVI18nMissing` | Show only missing keys, grouped by missing language |
-| `:VVI18nReferences` | Open a foldable reference sidebar for the key under the cursor |
+| `:VVI18nReferences` | Open a foldable reference sidebar for the call or definition under the cursor |
 | `:VVI18nUnused` | Audit, copy, and delete potentially unused keys |
-| `:VVI18nEdit` | Edit all language values for the key under the cursor |
-| `:VVI18nInfo` | Show every translation for the key under the cursor |
+| `:VVI18nEdit` | Edit all language values for the call or definition under the cursor |
+| `:VVI18nInfo` | Show every translation for the call or definition under the cursor |
 | `:VVI18nJump` | Jump to a locale definition |
 | `:VVI18nSetValue` | Quickly update one language |
 | `:VVI18nAddKey` | Add missing language values |

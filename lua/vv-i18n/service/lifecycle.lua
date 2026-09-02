@@ -8,6 +8,22 @@ local ReferenceScanners = require('vv-i18n.references.scanners')
 
 local M = {}
 
+--- 取高亮组前景色并向 Normal 背景混入 amount 比例，得到同色相的柔和版本；缺少前景或背景时原样返回
+---@param group string
+---@param amount number 0-1，越大越接近背景
+---@return integer? fg
+local function muted_fg(group, amount)
+  local ok, base = pcall(vim.api.nvim_get_hl, 0, { name = group, link = false })
+  if not ok or type(base) ~= 'table' or type(base.fg) ~= 'number' then return nil end
+  local nok, normal = pcall(vim.api.nvim_get_hl, 0, { name = 'Normal', link = false })
+  if not nok or type(normal) ~= 'table' or type(normal.bg) ~= 'number' then return base.fg end
+  local mok, mixed = pcall(function()
+    local color = require('vv-utils.color')
+    return color.to_integer(color.mix(base.fg, normal.bg, amount))
+  end)
+  return mok and mixed or base.fg
+end
+
 local function apply_display_hl(state)
   local display = state.config.display
   if display.style then
@@ -20,6 +36,15 @@ local function apply_display_hl(state)
     pcall(vim.api.nvim_set_hl, 0, display.missing_hl, display.missing_style)
   else
     pcall(vim.api.nvim_set_hl, 0, display.missing_hl, { link = 'DiagnosticVirtualTextWarn', default = true })
+  end
+
+  -- 引用数数字：默认借主题 Statement 的前景色（多数主题为紫/品红），向 Normal 背景混色压低饱和度，
+  -- 使其在行尾虚拟文本里醒目但不刺眼；不加粗。随 ColorScheme 重算
+  local references = state.config.references
+  if references.count_style then
+    pcall(vim.api.nvim_set_hl, 0, references.count_hl, references.count_style)
+  else
+    pcall(vim.api.nvim_set_hl, 0, references.count_hl, { fg = muted_fg('Statement', 0.3) })
   end
 end
 
