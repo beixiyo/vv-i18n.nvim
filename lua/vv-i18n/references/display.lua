@@ -8,13 +8,12 @@ local enabled = false
 local unsubscribe
 local augroup
 
---- 默认渲染：图标与文字用 ctx.hl，数字单独用 ctx.count_hl 突出
+--- 默认渲染：图标用 ctx.icon_hl，数字单独用 ctx.count_hl 突出，标签用 ctx.hl
 local function default_chunks(ctx)
-  local label = ctx.count == 1 and 'reference' or 'references'
   return {
-    { ctx.icon, ctx.hl },
+    { ctx.icon, ctx.icon_hl },
     { tostring(ctx.count), ctx.count_hl },
-    { ' ' .. label, ctx.hl },
+    { ' ' .. ctx.label, ctx.hl },
   }
 end
 
@@ -43,6 +42,8 @@ local function render_buffer(bufnr)
           entry = definition.entry,
           count = count,
           icon = config.icon,
+          icon_hl = config.icon_hl,
+          label = config.label,
           hl = config.hl,
           count_hl = config.count_hl,
         }
@@ -54,6 +55,8 @@ local function render_buffer(bufnr)
         vim.api.nvim_buf_set_extmark(bufnr, ns, definition.entry.row or 0, 0, {
           virt_text = chunks,
           virt_text_pos = 'eol',
+          -- combine：前景用 chunk 高亮、背景跟随底层行（否则 replace 会把光标行背景截断成普通背景色块）
+          hl_mode = 'combine',
         })
       end
     end

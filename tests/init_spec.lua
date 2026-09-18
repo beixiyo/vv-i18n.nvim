@@ -141,6 +141,15 @@ check('lookup app.common.ok=确定', (i18n.lookup('app.common.ok') or {})['zh-CN
 local files = i18n.files_for('app.hero.title')
 check('files_for 2 文件', files and #files == 2, files and #files)
 check('has_keys 真', i18n.has_keys())
+
+-- references 计数默认契约：refs 标签 + 图标独立高亮组（对齐 vv-symbols）
+local refs_cfg = i18n.get_config().references
+check('references 默认 label=refs', refs_cfg.label == 'refs' and refs_cfg.icon_hl == 'VVI18nReferenceIcon', refs_cfg.label)
+check('references 图标高亮组已定义', vim.fn.hlexists('VVI18nReferenceIcon') == 1)
+check('references 数字高亮与图标统一为 Special', (function()
+  local count = vim.api.nvim_get_hl(0, { name = refs_cfg.count_hl })
+  return type(count) == 'table' and count.link == 'Special'
+end)())
 check('classify 命中', (i18n.classify('app.hero.title')) == 'hit')
 check('classify 缺键=missing', (i18n.classify('app.hero.NOPE')) == 'missing')
 check('classify 越界=out', (i18n.classify('zzz.foo')) == 'out')
@@ -196,6 +205,49 @@ check('多源建 2 索引', #idxs == 2, #idxs)
 check('多源 lookup 源1 app.hero.title', i18n.lookup('app.hero.title') ~= nil)
 check('多源 lookup 源2 common.ok', i18n.lookup('common.ok') ~= nil)
 check('多源 files_for 源2', (function() local f = i18n.files_for('common.ok'); return f and #f == 2 end)())
+
+-- 回归：路径作用域全链路。修复前：两个互斥 root 的源各自对对方包内的调用凭
+-- no-binding 前缀造出竞争 key，collect_buffer 整体判 ambiguous，display/引用计数全部丢失
+local function buffer_at(path)
+  local b = vim.fn.bufadd(path)
+  vim.fn.bufload(b)
+  vim.bo[b].filetype = 'typescriptreact'
+  return b
+end
+
+local ns_buf = buffer_at(H.fixture('ns-app/src/pages/Home.tsx'))
+local ns_hits = {}
+for _, r in ipairs(i18n.collect_buffer(ns_buf)) do
+  if r.kind == 'hit' then ns_hits[#ns_hits + 1] = r.full_key end
+end
+check('多源下 ns-app 文件命中自身键', vim.tbl_contains(ns_hits, 'app.hero.title'), vim.inspect(ns_hits))
+check('多源下 ns-app 文件不再判歧义', (function()
+  for _, r in ipairs(i18n.collect_buffer(ns_buf)) do
+    if r.kind == 'ambiguous' then return false end
+  end
+  return true
+end)())
+
+local file_ns_buf = buffer_at(H.fixture('file-ns/src/App.tsx'))
+local file_ns_first = i18n.collect_buffer(file_ns_buf)[1]
+check('多源下 file-ns 文件命中 common.ok', file_ns_first and file_ns_first.kind == 'hit'
+  and file_ns_first.full_key == 'common.ok', file_ns_first and file_ns_first.kind)
+
+-- 回归：root 尾斜杠归一化后仍按辖区解析（不静默回退全 source）
+i18n.setup({
+  root = H.FIXTURES,
+  display = { enable = false },
+  sources = {
+    { prefix = 'app', root = 'ns-app/src', discover = { 'components/*/locales', 'i18n/common' },
+      mount = 'top-key', namespace = 'two-level', lang = '{lang}.ts', hooks = { 'useT' } },
+    { prefix = '', root = 'file-ns/src/', discover = { 'locales' },
+      mount = 'filename', namespace = 'hook-arg', lang = '{lang}/{ns}.json', hooks = { 'useTranslation' } },
+  },
+})
+i18n.reload()
+local slash_first = i18n.collect_buffer(file_ns_buf)[1]
+check('root 尾斜杠归一化后仍按辖区命中', slash_first and slash_first.kind == 'hit'
+  and slash_first.full_key == 'common.ok', slash_first and slash_first.kind)
 
 local scanner_config = H.ns_config()
 scanner_config.references = {

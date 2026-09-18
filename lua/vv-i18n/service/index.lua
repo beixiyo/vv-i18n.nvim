@@ -16,10 +16,17 @@ local function abspath(path, root)
   return vim.startswith(path, '/') and path or root .. '/' .. path
 end
 
+--- 相对 root 拼绝对路径并归一化（去尾部斜杠），供调用点按 root 作用域过滤
+local function scoped_root(path, root)
+  local dir = vim.fs.normalize(abspath(path, root))
+  return (dir:gsub('/+$', ''))
+end
+
 local function normalize_source(config, raw)
   return {
     prefix = raw.prefix or '',
-    root = raw.root,
+    -- 空串 root 等同未配置（不参与调用点辖区），避免 '' 被当作 truthy 认领整个项目根
+    root = raw.root ~= nil and raw.root ~= '' and raw.root or nil,
     discover = raw.discover,
     dirs = raw.dirs,
     lang = raw.lang ~= nil and raw.lang or config.lang,
@@ -68,6 +75,7 @@ function M.reload(state, plugin)
     })
     state.indexes[#state.indexes + 1] = {
       source = source,
+      root_path = source.root and scoped_root(source.root, state.root) or nil,
       index = index,
       ropts = {
         namespace_resolver = resolver.make_namespace(source.namespace, source.prefix, state.config.key_separator),

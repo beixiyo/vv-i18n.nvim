@@ -168,6 +168,35 @@ check('多 source 不覆盖不同 full key', ambiguous and ambiguous.kind == 'am
 check('歧义结果保留 source_ids/candidates', ambiguous and #ambiguous.source_ids == 2
   and #ambiguous.candidates == 2)
 
+-- 回归：路径作用域。配了 root 的 source 只认领 root 下的文件；
+-- 修复前：ns-app 文件里的 t('ok') 会被 file-ns 源凭 no-binding 前缀解析成另一个 key，
+-- 整体判 ambiguous → 行内预览/引用计数全部丢失（同一 root 内互斥包彼此污染）
+local scoped_state = { indexes = {
+  vim.tbl_extend('force', query_source('app', app_index), { root_path = H.fixture('ns-app') }),
+  vim.tbl_extend('force', query_source('common', common_index), { root_path = H.fixture('file-ns') }),
+} }
+local scoped_content = "const t = useT()\nt('ok')"
+local ns_results = Query.collect_content(scoped_state, {}, scoped_content, H.fixture('ns-app/src/pages/Home.tsx'))
+check('root 内文件只由该 source 解析并命中', ns_results[1] and ns_results[1].kind == 'hit'
+  and ns_results[1].full_key == 'app.ok', ns_results[1] and ns_results[1].kind)
+check('命中保留全量列表 source_id 编号', ns_results[1] and ns_results[1].source_id == 1,
+  ns_results[1] and ns_results[1].source_id)
+local file_ns_results = Query.collect_content(scoped_state, {}, scoped_content, H.fixture('file-ns/src/App.tsx'))
+check('另一 root 内文件由另一 source 认领', file_ns_results[1] and file_ns_results[1].kind == 'hit'
+  and file_ns_results[1].full_key == 'common.ok', file_ns_results[1] and file_ns_results[1].full_key)
+check('跨 root 认领仍按全量 source_id 归属', file_ns_results[1] and file_ns_results[1].source_id == 2,
+  file_ns_results[1] and file_ns_results[1].source_id)
+-- 绝对命名空间 ns:key 前缀无关，豁免辖区过滤：辖区外 source 仍能提供命中，
+-- 修复前会被一刀切丢弃导致预览与引用计数丢失
+local abs_results = Query.collect_content(scoped_state, {}, "const t = useT()\nt('common:ok')",
+  H.fixture('ns-app/src/pages/Home.tsx'))
+check('绝对命名空间跨 root 仍命中', abs_results[1] and abs_results[1].kind == 'hit'
+  and abs_results[1].full_key == 'common.ok', abs_results[1] and abs_results[1].kind)
+local outside_results = Query.collect_content(scoped_state, {}, scoped_content, H.fixture('flat-app/src/App.tsx'))
+check('任何 root 外的文件回退全 source 尝试（保留歧义保护）', outside_results[1]
+  and outside_results[1].kind == 'ambiguous' and #outside_results[1].full_keys == 2,
+  outside_results[1] and outside_results[1].kind)
+
 local dynamic_index = fake_index({ ['app.hero.title'] = common_entry, ['app.hero.body'] = common_entry })
 local dynamic_state = { indexes = { query_source('app', dynamic_index) } }
 local dynamic_results = Query.collect_content(dynamic_state, {}, [[const t = useT()

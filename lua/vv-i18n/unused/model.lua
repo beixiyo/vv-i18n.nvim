@@ -1,7 +1,7 @@
 -- vv-i18n unused 候选分析
 --
 -- 这里故意只做数据转换：静态扫描没有找到引用，只能产生候选，不能证明键
--- 绝对未使用。UI、扫描生命周期和删除事务由上层模块负责。
+-- 绝对未使用。UI、扫描生命周期和删除事务由上层模块负责
 
 local M = {}
 
@@ -240,7 +240,7 @@ function M.build_candidates(tree, references, opts)
   return M.analyze(opts).candidates
 end
 
--- build 的位置参数形式是公开契约；保留 analyze 作为完整报告入口。
+-- build 的位置参数形式是公开契约；保留 analyze 作为完整报告入口
 M.build = M.build_candidates
 
 --- 返回完整的静态分析盲区清单；每次调用返回独立副本

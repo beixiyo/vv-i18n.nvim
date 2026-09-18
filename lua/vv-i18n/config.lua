@@ -40,9 +40,12 @@ local defaults = {
   references = {
     enable = true,
     icon = '󰗊 ',
+    icon_hl = 'VVI18nReferenceIcon',   -- 图标高亮组；默认 link Special（对齐 vv-symbols）
+    icon_style = nil,                  -- 直接定义图标样式；nil=默认 link Special
+    label = 'refs',                    -- 计数标签文案
     hl = 'Comment',
-    count_hl = 'VVI18nReferenceCount',  -- 引用数数字高亮组
-    count_style = nil,                  -- 直接定义数字样式 { fg=, bold= }；nil=默认(主题 Statement 前景色向背景混 30%，不加粗)
+    count_hl = 'VVI18nReferenceCount',  -- 引用数数字高亮组；默认 link Special
+    count_style = nil,                  -- 直接定义数字样式 { fg=, bold= }；nil=默认 link Special
     jump_single = false,
     show_zero = false,
     render = nil,

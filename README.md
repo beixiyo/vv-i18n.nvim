@@ -128,6 +128,14 @@ sources = {
 }
 ```
 
+`root` also defines each source's territory for resolving `t()` calls: a file is resolved only by
+the sources whose `root` contains it. Otherwise sources from other packages would apply their own
+prefix rules to the same call and produce different keys, which is reported as ambiguous and hidden.
+`ns:key` absolute namespace literals are prefix-independent and still resolve in any file.
+Files outside every `root` keep the old behavior: all sources are tried; a source without `root`
+never claims files inside another source's `root`, and path forms that differ only by symlink or
+letter case also fall back to all sources.
+
 ## Four configurable axes
 
 Every axis accepts either a literal strategy or a function.
@@ -202,9 +210,12 @@ require('vv-i18n').setup({
   references = {
     enable = true,
     icon = '󰗊 ',
-    hl = 'Comment',                    -- Icon and label highlight
+    icon_hl = 'VVI18nReferenceIcon',  -- Highlight group for the icon
+    icon_style = nil,                 -- nil: link `Special` (matches vv-symbols); or { fg = '#89dceb' }
+    label = 'refs',                   -- Count label text
+    hl = 'Comment',                    -- Label highlight
     count_hl = 'VVI18nReferenceCount', -- Highlight group for the number
-    count_style = nil,                 -- nil: theme `Statement` foreground softened 30% toward the background; or { fg = '#f5c2e7' }
+    count_style = nil,                 -- nil: link `Special`
     jump_single = false,               -- Jump directly when exactly one reference exists
     show_zero = false,                 -- Show zero-reference virtual text
     render = nil,                      -- Definition reference-count renderer

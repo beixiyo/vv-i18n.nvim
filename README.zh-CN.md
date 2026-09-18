@@ -126,6 +126,13 @@ sources = {
 }
 ```
 
+`root` 除定位 locale 目录外，还划定了该 source 的辖区：解析 `t()` 调用时，先看当前文件
+位于哪些 source 的 `root` 下，只由它们解析。否则其它包的 source 也会按各自前缀规则
+把同一个调用解析成不同的 key（被判歧义而不显示）。`ns:key` 绝对命名空间前缀无关，
+任何文件内均可解析。不在任何 `root` 下的文件保持旧行为由全部 source 尝试；未配 `root`
+的 source 不会认领其它 source 辖区内的文件，仅 symlink 或大小写不一致的路径形态也会
+回退到全部 source 尝试
+
 ## 四个可配轴（每个都「字面量 | 函数」）
 
 | 轴          | 作用            | 字面量                                              | 函数                       |
@@ -199,9 +206,12 @@ require('vv-i18n').setup({
   references = {
     enable = true,
     icon = '󰗊 ',
-    hl = 'Comment',                    -- 图标与文字高亮
+    icon_hl = 'VVI18nReferenceIcon',  -- 图标高亮组
+    icon_style = nil,                 -- nil：link `Special`（对齐 vv-symbols）；或 { fg = '#89dceb' }
+    label = 'refs',                   -- 计数标签文案
+    hl = 'Comment',                    -- 标签文字高亮
     count_hl = 'VVI18nReferenceCount', -- 数字高亮组
-    count_style = nil,                 -- nil：主题 `Statement` 前景色向背景混 30%（柔和、不加粗）；或 { fg = '#f5c2e7' }
+    count_style = nil,                 -- nil：link `Special`
     jump_single = false,               -- 只有一个引用时直接跳转
     show_zero = false,                 -- 显示零引用虚拟文本
     render = nil,                      -- 自定义定义处引用数

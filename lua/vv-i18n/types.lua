@@ -1,7 +1,7 @@
 -- 仅供 LuaLS 使用的公共类型声明；运行时代码不得依赖此模块
 ---@class VVI18nSource
 ---@field prefix? string         命名空间根；''=无前缀 @default ''
----@field root? string           本源扫描根（相对 config.root 或绝对） @default config.root
+---@field root? string           本源扫描根（相对 config.root 或绝对）；同时是调用点解析的作用域：配了 root 时只解析该目录下文件中的 t() 调用，nil=不限（目录默认 config.root） @default nil
 ---@field discover? string[]|fun(root: string): string[]  发现 locale 目录：glob 数组 或 函数 @default nil
 ---@field dirs? string[]         显式 locale 目录（与 discover 叠加） @default nil
 ---@field lang? string|string[]|fun(path): (string|table|nil)  文件→语言（覆盖全局）
@@ -78,9 +78,12 @@
 ---@class VVI18nReferencesConfig
 ---@field enable boolean         扫描项目引用并在定义处显示计数 @default true
 ---@field icon string            定义处引用数图标 @default '󰗊 '
----@field hl string              定义处引用数图标与文字高亮 @default 'Comment'
+---@field icon_hl string         图标高亮组 @default 'VVI18nReferenceIcon'
+---@field icon_style? vim.api.keyset.highlight  图标样式；nil=link Special（对齐 vv-symbols） @default nil
+---@field label string           计数标签文案 @default 'refs'
+---@field hl string              定义处引用数文字高亮 @default 'Comment'
 ---@field count_hl string        定义处引用数数字高亮组 @default 'VVI18nReferenceCount'
----@field count_style? vim.api.keyset.highlight  数字样式；nil=主题 Statement 前景色向 Normal 背景混 30%，不加粗 @default nil
+---@field count_style? vim.api.keyset.highlight  数字样式；nil=link Special
 ---@field jump_single boolean    单个引用时直接跳转，不打开侧栏 @default false
 ---@field show_zero boolean      是否显示零引用虚拟文本 @default false
 ---@field render? fun(ctx: table): (string|table[]|nil)  定义处虚拟文本自定义渲染

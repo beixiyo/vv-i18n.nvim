@@ -13,6 +13,33 @@ local function indexes(state, plugin)
   return Index.ensure(state, plugin)
 end
 
+--- 调用点路径作用域：配了 root 的 source 只认领 root 下的文件；文件落在任一 root 内时
+--- 其余 source 不再参与该文件的相对 key 解析（多包 mono-repo 各自认领，避免无关 source 凭
+--- no-binding 前缀造出竞争 key 而整体判歧义）；不在任何 root 内时全部参与（保留既有行为）
+--- 绝对命名空间 ns:key 前缀无关，由调用方豁免辖区过滤
+--- 返回 全量列表 + 参与集合；source_id 仍按全量列表编号，面板/引用映射不变
+local function scoped_indexes(state, plugin, path)
+  local all = indexes(state, plugin)
+  local active, matched = {}, 0
+
+  if path and path ~= '' then
+    local norm = vim.fs.normalize(path)
+    for _, source in ipairs(all) do
+      local root = source.root_path
+      if root and root ~= '' and vim.startswith(norm, root .. '/') then
+        active[source] = true
+        matched = matched + 1
+      end
+    end
+  end
+
+  if matched == 0 then
+    for _, source in ipairs(all) do active[source] = true end
+  end
+
+  return all, active
+end
+
 --- 该 source 的索引是否忽略此键；兼容只实现 get/owns/all_keys 的最小 index 替身（测试与外部注入）
 local function is_ignored(source, full_key)
   return source.index.is_ignored ~= nil and source.index:is_ignored(full_key)
@@ -126,9 +153,14 @@ function M.resolve_cursor(state, plugin, bufnr)
   local content = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
   local first, with_hook, ignored
 
-  for _, source in ipairs(indexes(state, plugin)) do
+  local all, active = scoped_indexes(state, plugin, vim.api.nvim_buf_get_name(bufnr))
+  for _, source in ipairs(all) do
     local opts = vim.tbl_extend('force', source.ropts, { lang = buf_lang(bufnr) })
     local result = resolver.resolve_in_content(content, row, col, opts)
+
+    -- 辖区外 source 只保留绝对命名空间结果（ns:key 自带命名空间、前缀无关，
+    -- 不会造成多源歧义）；相对 key 完全交由辖区内 source 解析
+    if result.ok and not active[source] and not result.absolute then result = { ok = false } end
 
     if result.ok then
       if is_ignored(source, result.full_key) then
@@ -149,7 +181,7 @@ function M.resolve_cursor(state, plugin, bufnr)
   return { ok = false, reason = ignored and 'ignored-key' or 'not-in-t-call' }
 end
 
-local function collect_content(state, plugin, content, lang)
+local function collect_content(state, plugin, content, lang, path)
   local root = ast.parse_root(content, lang)
   local calls = {}
 
@@ -173,7 +205,8 @@ local function collect_content(state, plugin, content, lang)
     return call
   end
 
-  for source_id, source in ipairs(indexes(state, plugin)) do
+  local all, active = scoped_indexes(state, plugin, path)
+  for source_id, source in ipairs(all) do
     if source.index:any_keys() then
       -- all_keys() 内部会排序；一个 source 在一次 buffer 扫描中只取一次
       local all_keys = source.index:all_keys()
@@ -193,7 +226,10 @@ local function collect_content(state, plugin, content, lang)
       local opts = vim.tbl_extend('force', source.ropts, { lang = lang, root = root })
 
       for _, result in ipairs(resolver.collect_in_content(content, opts)) do
-        if not (result.full_key and is_ignored(source, result.full_key)) then
+        -- 辖区外 source 只保留绝对命名空间结果（ns:key 前缀无关）；
+        -- 相对 key 与动态证据交由辖区内 source，避免 no-binding 前缀竞争歧义
+        local in_scope = active[source] or result.absolute
+        if in_scope and not (result.full_key and is_ignored(source, result.full_key)) then
           local id = result.range.srow .. ':' .. result.range.scol
           local call = call_for(id, result)
           local per = result.full_key and source.index:get(result.full_key)
@@ -361,11 +397,11 @@ end
 
 function M.collect_buffer(state, plugin, bufnr)
   local content = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
-  return collect_content(state, plugin, content, buf_lang(bufnr))
+  return collect_content(state, plugin, content, buf_lang(bufnr), vim.api.nvim_buf_get_name(bufnr))
 end
 
 function M.collect_content(state, plugin, content, path)
-  return collect_content(state, plugin, content, ast.lang_for_path(path))
+  return collect_content(state, plugin, content, ast.lang_for_path(path), path)
 end
 
 function M.reference_names(state, plugin)

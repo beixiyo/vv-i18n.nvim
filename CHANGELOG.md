@@ -1,12 +1,27 @@
 # Changelog
 
+## 0.1.5 - 2026-09-18
+
+### Added
+
+- 引用数图标独立高亮组 `VVI18nReferenceIcon`，数字默认色从主题 Statement 混色改为 link `Special`
+- 引用数标签文案可配置：`references.label`，默认 `'refs'`
+- 定义处引用数改为 combine 高亮模式，背景跟随底层行（光标行 cursorline 不再被截断成背景色块）
+
+### Fixed
+
+- 多 source 项目回归：调用点解析按 source `root` 划定辖区，文件只由所在 root 的 source 解析；
+  修复互斥包的 source 凭 no-binding 前缀造出竞争 key，把命中整体判 `ambiguous`，
+  导致行内预览与引用计数全部丢失的问题。绝对命名空间 `ns:key` 前缀无关、豁免辖区过滤；
+  不在任何 root 内的文件仍由全部 source 尝试（保留歧义保护）；空串 `root` 视为未配置
+
 ## 0.1.4 - 2026-09-02
 
 ### Added
 
 - 光标位于 locale 文件的 key 定义处时，可直接操作该 key
 - 定义处引用数虚拟文本的数字改为独立高亮组 `VVI18nReferenceCount`
-- 新增 `ignore_key(full_key)` 
+- 新增 `ignore_key(full_key)`
 
 ## 0.1.3 - 2026-08-19
 
