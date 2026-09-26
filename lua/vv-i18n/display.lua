@@ -16,6 +16,7 @@ local enabled = false
 local augroup = nil
 local cache = {}      -- bufnr -> { items }
 local touched = {}    -- winid -> { cl, cc }  （conceal 选项原值，还原用）
+local active = nil    -- { plugin, config }：enable 时记下，reload 后由 refresh 换成新 config
 
 --- 组装一项的 virt_text chunks（支持 display.render 函数自定义）
 ---@return table[] chunks  { {text, hl}, ... }
@@ -142,18 +143,34 @@ local function restore_conceal()
   touched = {}
 end
 
+--- 重算所有窗口里已加载的匹配 buffer
+local function recompute_visible(plugin, config)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local b = vim.api.nvim_win_get_buf(win)
+    if vim.api.nvim_buf_is_loaded(b) and ft_match(b, config.ft) then
+      set_conceal(win)
+      recompute(plugin, config, b)
+    end
+  end
+end
+
 function M.enable(plugin, config)
   if enabled then return end
   enabled = true
+  active = { plugin = plugin, config = config }
   augroup = vim.api.nvim_create_augroup('VVI18nDisplay', { clear = true })
 
-  -- 内容 / 进窗 → 装 conceal + 重算（含 parse）
-  vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWinEnter', 'WinEnter', 'BufWritePost', 'TextChanged', 'InsertLeave' }, {
+  -- 内容 / 进窗 / 切回 nvim → 装 conceal + 重算（含 parse）
+  -- 重算前先核对 locale 指纹：Agent 等外部工具改了 locale 文件时自动重建索引，
+  -- 重建会经 refresh 重算全部可见 buffer，本次不必再算
+  vim.api.nvim_create_autocmd({ 'BufEnter', 'BufWinEnter', 'WinEnter', 'BufWritePost', 'TextChanged', 'InsertLeave', 'FocusGained' }, {
     group = augroup,
     callback = vim.schedule_wrap(function(args)
-      if not enabled or not ft_match(args.buf, config.ft) then return end
+      if not enabled or not active then return end
+      if active.plugin.refresh_if_stale and active.plugin.refresh_if_stale() then return end
+      if not ft_match(args.buf, active.config.ft) then return end
       if vim.api.nvim_get_current_buf() == args.buf then set_conceal(vim.api.nvim_get_current_win()) end
-      recompute(plugin, config, args.buf)
+      recompute(active.plugin, active.config, args.buf)
     end),
   })
   -- 光标移动 → 只重绘（不 parse），实现 token 级还原
@@ -164,18 +181,23 @@ function M.enable(plugin, config)
     end,
   })
 
-  -- 立即处理所有窗口里已加载的匹配 buffer
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local b = vim.api.nvim_win_get_buf(win)
-    if vim.api.nvim_buf_is_loaded(b) and ft_match(b, config.ft) then
-      set_conceal(win)
-      recompute(plugin, config, b)
-    end
-  end
+  recompute_visible(plugin, config)
+end
+
+--- 索引重建后重算预览：丢弃全部缓存（隐藏 buffer 下次进入时再算），立即重算可见 buffer
+--- 未启用时为 no-op
+---@param plugin table
+---@param config table  重建后的新 config
+function M.refresh(plugin, config)
+  if not enabled then return end
+  active = { plugin = plugin, config = config }
+  cache = {}
+  recompute_visible(plugin, config)
 end
 
 function M.disable()
   enabled = false
+  active = nil
   if augroup then pcall(vim.api.nvim_del_augroup_by_id, augroup); augroup = nil end
   restore_conceal()
   cache = {}

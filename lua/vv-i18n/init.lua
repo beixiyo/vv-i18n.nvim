@@ -13,6 +13,9 @@ function M.setup(opts) return Lifecycle.setup(state, M, opts) end
 
 function M.reload() return Lifecycle.reload(state, M) end
 
+--- locale 文件在磁盘上有变化时重建索引并刷新预览；返回是否发生了重建
+function M.refresh_if_stale() return Lifecycle.refresh_if_stale(state, M) end
+
 function M.lookup(full_key) return Query.lookup(state, M, full_key) end
 
 function M.files_for(full_key) return Query.files_for(state, M, full_key) end

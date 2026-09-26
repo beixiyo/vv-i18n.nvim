@@ -53,6 +53,26 @@ local function source_dirs(source, project_root)
   return dirs
 end
 
+--- locale 文件指纹：各 source 目录下全部文件的路径 + mtime + size
+--- 新增 / 删除 / 改写 locale 文件，以及目录集合变化，都会改变指纹
+---@param dir_lists string[][]  每个 source 的 locale 目录
+---@return string
+local function fingerprint(dir_lists)
+  local parts = {}
+  for _, dirs in ipairs(dir_lists) do
+    for _, dir in ipairs(dirs) do
+      parts[#parts + 1] = 'D' .. dir
+      for _, f in ipairs(Index.walk_files(dir)) do
+        local st = vim.uv.fs_stat(f.path)
+        if st then
+          parts[#parts + 1] = ('%s\0%d.%d\0%d'):format(f.path, st.mtime.sec, st.mtime.nsec, st.size)
+        end
+      end
+    end
+  end
+  return table.concat(parts, '\n')
+end
+
 function M.reload(state, plugin)
   local project, project_dir = Project.load(state.base_config)
 
@@ -62,10 +82,18 @@ function M.reload(state, plugin)
   state.indexes = {}
   state.errors = {}
 
-  for _, raw in ipairs(state.config.sources) do
-    local source = normalize_source(state.config, raw)
+  -- 每个 source 只解析一次目录（discover 可能是带副作用的用户函数），构建与指纹共用
+  local sources, dir_lists = {}, {}
+  for i, raw in ipairs(state.config.sources) do
+    sources[i] = normalize_source(state.config, raw)
+    dir_lists[i] = source_dirs(sources[i], state.root)
+  end
+  -- 构建前取指纹：构建期间发生的改写会让下次 is_stale 命中，而不是被这次快照吞掉
+  state.fingerprint = fingerprint(dir_lists)
+
+  for i, source in ipairs(sources) do
     local index, errors = Index.build({
-      dirs = source_dirs(source, state.root),
+      dirs = dir_lists[i],
       prefix = source.prefix,
       key_separator = state.config.key_separator,
       ignore_key = state.config.ignore_key,
@@ -76,6 +104,7 @@ function M.reload(state, plugin)
     state.indexes[#state.indexes + 1] = {
       source = source,
       root_path = source.root and scoped_root(source.root, state.root) or nil,
+      dirs = dir_lists[i],
       index = index,
       ropts = {
         namespace_resolver = resolver.make_namespace(source.namespace, source.prefix, state.config.key_separator),
@@ -96,6 +125,21 @@ function M.reload(state, plugin)
     state.references_dirty = true
   end
   return state.indexes
+end
+
+--- 磁盘上的 locale 文件是否已偏离当前索引（外部工具 / Agent 改写、新增、删除）
+--- 未建过索引时返回 false：交给 ensure 首次构建
+---@param state table
+---@return boolean
+function M.is_stale(state)
+  if not state.indexes then return false end
+  local dir_lists = {}
+  for i, entry in ipairs(state.indexes) do
+    -- glob 形式重新匹配以发现新增的 locale 目录；函数形式是用户代码，沿用上次的结果
+    dir_lists[i] = type(entry.source.discover) == 'function' and entry.dirs
+      or source_dirs(entry.source, state.root)
+  end
+  return fingerprint(dir_lists) ~= state.fingerprint
 end
 
 function M.ensure(state, plugin)

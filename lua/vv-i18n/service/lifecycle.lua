@@ -76,7 +76,17 @@ function M.reload(state, plugin)
   References.clear()
   local indexes = Index.reload(state, plugin)
   apply_display_hl(state)
+  -- 预览缓存里是旧索引算出的 hit/missing，不重算就要靠 toggle 才能看到新译文
+  require('vv-i18n.display').refresh(plugin, state.config)
   return indexes
+end
+
+--- locale 文件在磁盘上变了（外部工具 / Agent 改写）才重建索引
+---@return boolean reloaded
+function M.refresh_if_stale(state, plugin)
+  if not Index.is_stale(state) then return false end
+  M.reload(state, plugin)
+  return true
 end
 
 function M.setup(state, plugin, opts)

@@ -29,6 +29,7 @@ local function walk_files(dir)
   if not ok then return {} end
   return out
 end
+M.walk_files = walk_files
 
 --- 文件名 stem（去目录去扩展名）
 local function stem_of(path)
