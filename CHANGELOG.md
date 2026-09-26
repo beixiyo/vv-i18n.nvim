@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.6 - 2026-09-26
+
+### Added
+
+- 新增 `refresh_if_stale()`：locale 文件在磁盘上有变化时重建索引并刷新预览
+
+### Fixed
+
+- locale 文件被外部工具或 Agent 改写后，行内预览不再一直显示缺失：切回 nvim、进入 buffer、编辑或保存时自动检测 locale 文件变化并重建索引
+- 手动 `:VVI18nReload` 后预览立即刷新，不再需要 toggle 一次
+
 ## 0.1.5 - 2026-09-18
 
 ### Added
