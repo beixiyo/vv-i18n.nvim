@@ -107,8 +107,24 @@ end
 --- 重新计算（parse）+ 缓存 + 绘制
 local function recompute(plugin, config, bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then return end
-  cache[bufnr] = { items = M.compute(plugin, config, bufnr) }
+  cache[bufnr] = {
+    items = M.compute(plugin, config, bufnr),
+    tick = vim.api.nvim_buf_get_changedtick(bufnr),
+  }
   redraw(bufnr)
+end
+
+--- 内容未变时只重绘，不重新 parse。compute 只依赖 buffer 内容与索引/配置：内容变化会推进
+--- changedtick，索引重建与配置变更经 refresh / disable 整体清空 cache，因此 tick 相同即结果相同
+--- 进窗类事件（BufEnter / BufWinEnter / WinEnter / FocusGained）在切 buffer 时会成串触发，
+--- 这里把它们收敛成每份内容只算一次
+local function ensure_computed(plugin, config, bufnr)
+  local st = cache[bufnr]
+  if st and st.tick == vim.api.nvim_buf_get_changedtick(bufnr) then
+    redraw(bufnr)
+    return
+  end
+  recompute(plugin, config, bufnr)
 end
 
 --- 重算并渲染（外部入口 / 测试用）
@@ -170,8 +186,13 @@ function M.enable(plugin, config)
       if active.plugin.refresh_if_stale and active.plugin.refresh_if_stale() then return end
       if not ft_match(args.buf, active.config.ft) then return end
       if vim.api.nvim_get_current_buf() == args.buf then set_conceal(vim.api.nvim_get_current_win()) end
-      recompute(active.plugin, active.config, args.buf)
+      ensure_computed(active.plugin, active.config, args.buf)
     end),
+  })
+  -- 缓存按 bufnr 存；vv-git 等会连续创建临时 buffer，wipe 时顺手释放
+  vim.api.nvim_create_autocmd('BufWipeout', {
+    group = augroup,
+    callback = function(args) cache[args.buf] = nil end,
   })
   -- 光标移动 → 只重绘（不 parse），实现 token 级还原
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {

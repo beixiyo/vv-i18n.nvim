@@ -109,19 +109,42 @@ function M.missing_report(state, plugin)
   return out
 end
 
-function M.definitions_for_file(state, plugin, path)
-  local normalized = vim.fs.normalize(path)
-  local out = {}
-  for _, source in ipairs(indexes(state, plugin)) do
+-- 文件 → 定义列表的反查表，按 indexes 表身份缓存：索引只会在 reload 时整体替换
+-- （Index.reload 新建 state.indexes / Runtime 置 nil），不会原地修改，故身份变了即失效
+-- 弱键：旧 indexes 被替换后随 GC 回收，不必显式清理
+local definitions_by_file = setmetatable({}, { __mode = 'k' })
+
+---@param all table[]  indexes(state, plugin) 的结果
+---@return table<string, table[]>
+local function build_definitions_by_file(all)
+  local by_file = {}
+
+  for _, source in ipairs(all) do
     for _, full_key in ipairs(source.index:all_keys()) do
       for lang, entry in pairs(source.index:get(full_key) or {}) do
-        if vim.fs.normalize(entry.file) == normalized then
-          out[#out + 1] = { full_key = full_key, lang = lang, entry = entry }
-        end
+        local file = vim.fs.normalize(entry.file)
+        local list = by_file[file]
+
+        if not list then list = {}; by_file[file] = list end
+        list[#list + 1] = { full_key = full_key, lang = lang, entry = entry }
       end
     end
   end
-  return out
+  return by_file
+end
+
+--- 该文件里定义的全部键。每次 BufEnter 都会对任意 buffer 调用，全量扫描所有键在大型
+--- locale 集合上要十几毫秒，因此首次调用建反查表，之后 O(1) 命中
+function M.definitions_for_file(state, plugin, path)
+  local all = indexes(state, plugin)
+  local by_file = definitions_by_file[all]
+
+  if not by_file then
+    by_file = build_definitions_by_file(all)
+    definitions_by_file[all] = by_file
+  end
+  -- 返回新表：调用方拿到的列表可随意修改，不污染缓存
+  return vim.list_extend({}, by_file[vim.fs.normalize(path)] or {})
 end
 
 local function preferred_lang(state, langs)

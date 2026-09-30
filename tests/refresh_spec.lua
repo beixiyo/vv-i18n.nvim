@@ -72,5 +72,24 @@ vim.api.nvim_exec_autocmds('FocusGained', {})
 vim.wait(100)
 check('locale 未变时不重建索引', i18n.refresh_if_stale() == false)
 
+-- definitions_for_file 走反查表缓存：reload 换了索引后必须反映新键，不能返回旧快照
+local function defined_keys()
+  local keys = {}
+  for _, d in ipairs(i18n.definitions_for_file(locale)) do keys[#keys + 1] = d.full_key end
+  table.sort(keys)
+  return table.concat(keys, ',')
+end
+check('reload 前 locale 文件的定义', defined_keys() == 'greeting.bye,greeting.hello', defined_keys())
+write_locale({ hello = 'Hello', bye = 'Goodbye', later = 'Later' })
+i18n.reload()
+check('reload 后 definitions_for_file 反映新增键', defined_keys() == 'greeting.bye,greeting.hello,greeting.later',
+  defined_keys())
+
+-- 预览按 changedtick 缓存：内容没变的进窗事件只重绘，内容变了必须重算
+vim.api.nvim_buf_set_lines(0, 2, 3, false, { "const b = t('greeting.later')" })
+vim.api.nvim_exec_autocmds('BufEnter', { buffer = 0 })
+vim.wait(100)
+check('buffer 内容改动后再次进入会重算预览', (preview_at(3) or ''):find('Later', 1, true) ~= nil, preview_at(3))
+
 done()
 vim.cmd('qa!')
