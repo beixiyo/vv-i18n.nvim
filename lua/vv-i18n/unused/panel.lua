@@ -33,7 +33,10 @@ local function create_panel(plugin, actions)
   local panel
   local unsubscribe
   local panel_buf
-  local stop_loading
+  local release_loading
+  local loading = Loading.slot(function()
+    return Loading.mark({ buf = panel_buf, get_pos = function() return { row = 1 } end, pos = 'eol' })
+  end)
   local filter_query = ''
   local filter_prompt
 
@@ -64,15 +67,11 @@ local function create_panel(plugin, actions)
   local function sync_loading()
     local scanning = actions.report and actions.report.scan and actions.report.scan.status == 'scanning'
     if not scanning then
-      if stop_loading then stop_loading(); stop_loading = nil end
+      if release_loading then release_loading(); release_loading = nil end
       return
     end
-    if stop_loading or not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
-    stop_loading = Loading.start({
-      buf = panel_buf,
-      get_row = function() return 1 end,
-      prefix = ' ',
-    })
+    if release_loading or not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
+    release_loading = loading:acquire()
   end
 
   panel = TreePanel.new({
@@ -119,11 +118,11 @@ local function create_panel(plugin, actions)
       end
       require('vv-utils.mouse').block_visual_drag(buf)
       if opts.on_attach then opts.on_attach(current, buf) end
-      sync_loading()
     end,
     on_close = function()
       if filter_prompt then filter_prompt.close(); filter_prompt = nil end
-      if stop_loading then stop_loading(); stop_loading = nil end
+      loading:dispose()
+      release_loading = nil
       if unsubscribe then unsubscribe() end
       if active_panel == panel then active_panel = nil end
       if active_actions == actions then active_actions = nil end

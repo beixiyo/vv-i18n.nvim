@@ -1,6 +1,7 @@
 -- 当前 i18n key 的引用侧栏
 
 local TreePanel = require('vv-utils.tree_panel')
+local Loading = require('vv-utils.loading')
 local Filter = require('vv-i18n.filter')
 local References = require('vv-i18n.references.index')
 local Ast = require('vv-i18n.ast')
@@ -31,6 +32,8 @@ local function file_nodes(full_key, query)
           id = 'file:' .. ref.file,
           label = Path.collapse_middle(ref.relative, { head = 1, tail = 3 }),
           selectable = false,
+          -- 展开时只是文件标签，j/k 直接在引用行之间移动；折叠、展开都能在引用行上完成
+          navigable = 'folded',
           children = {},
           data = { relative = ref.relative },
         }
@@ -113,6 +116,28 @@ function M.toggle(plugin, full_key)
   local panel
   local filter_query = ''
   local filter_prompt
+  local has_nodes = false
+  local release_loading
+  local loading = Loading.slot(function()
+    return Loading.mark({
+      buf = panel.buf,
+      -- 帧只跟在第 2 行的空状态 `Scanning references…` 后；过滤或已有节点时该行不是空状态
+      get_pos = function()
+        if filter_query ~= '' or has_nodes then return nil end
+        return { row = 2 }
+      end,
+      pos = 'eol',
+    })
+  end)
+
+  local function sync_loading()
+    if not References.is_scanning() then
+      if release_loading then release_loading(); release_loading = nil end
+      return
+    end
+    if release_loading or not panel.buf or not vim.api.nvim_buf_is_valid(panel.buf) then return end
+    release_loading = loading:acquire()
+  end
 
   local function rebuild(query)
     filter_query = query or ''
@@ -168,7 +193,11 @@ function M.toggle(plugin, full_key)
       end
       if opts.on_attach then opts.on_attach(current, buf) end
     end,
-    source = function() return file_nodes(full_key, filter_query) end,
+    source = function()
+      local nodes = file_nodes(full_key, filter_query)
+      has_nodes = #nodes > 0
+      return nodes
+    end,
     on_refresh = function()
       References.refresh(plugin, function()
         if panel:is_open() then panel:refresh() end
@@ -176,6 +205,8 @@ function M.toggle(plugin, full_key)
     end,
     on_close = function()
       if filter_prompt then filter_prompt.close(); filter_prompt = nil end
+      loading:dispose()
+      release_loading = nil
       if unsubscribe then unsubscribe() end
       if active_panel == panel then
         active_panel = nil
@@ -184,7 +215,8 @@ function M.toggle(plugin, full_key)
     end,
     render = {
       header = function()
-        local total = #References.get(full_key)
+        -- 扫描中数据已清空，显示 0 会被误读成没有引用
+        local total = References.is_scanning() and '…' or tostring(#References.get(full_key))
         local count = 0
         for _, group in ipairs(file_nodes(full_key, filter_query)) do count = count + #group.children end
         return {
@@ -193,8 +225,8 @@ function M.toggle(plugin, full_key)
             { full_key, 'Title' },
           },
           virt_text = { { filter_query ~= ''
-            and ('%d/%d · /%s'):format(count, total, filter_query)
-            or tostring(total), 'Comment' } },
+            and ('%d/%s · /%s'):format(count, total, filter_query)
+            or total, 'Comment' } },
         }
       end,
       node = opts.render or function(ctx) return node_renderer(ctx, syntax_cache) end,
@@ -212,8 +244,12 @@ function M.toggle(plugin, full_key)
   local ok, err = xpcall(function()
     panel:open()
     unsubscribe = References.subscribe(function()
-      if panel:is_open() then panel:refresh() end
+      if panel:is_open() then
+        panel:refresh()
+        sync_loading()
+      end
     end)
+    sync_loading()
   end, debug.traceback)
   if not ok then
     panel:close()

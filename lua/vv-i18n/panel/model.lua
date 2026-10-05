@@ -129,6 +129,7 @@ function M.nodes(tree, group_by, only_missing, selector, query)
       id = node_id('languages', { 'selector' }),
       label = 'Languages',
       selectable = false,
+      navigable = 'folded',
       children = children,
       data = { kind = 'languages', count = #children },
     }
@@ -156,6 +157,8 @@ function M.nodes(tree, group_by, only_missing, selector, query)
         id = id,
         label = group.mount,
         selectable = false,
+        -- 展开的分组标题只是标签：j/k 直接在 key 之间移动，折叠/展开在 key 行上用 h / Tab 完成
+        navigable = 'folded',
         children = children,
         data = { kind = 'group', group = group, count = #keys },
       }

@@ -364,8 +364,12 @@ references = {
 `collect` 返回带 0-based `range` 的 `hit`、`dynamic`、`ambiguous` 或 `missing`；字段见
 [`VVI18nReferenceResult`](lua/vv-i18n/types.lua)
 
-## 测试
+## 开发测试
 
-```bash
-bash tests/run.sh
+```sh
+./tests/run.sh [literal-filter]
 ```
+
+要求 Neovim 0.12+、Git、POSIX shell 与已有 vv-utils 源码（开发 vendors、lazy 或 native pack；`VV_UTILS` 可覆盖发现）。`NVIM_BIN` 可选择 Neovim。还要求 `rg`、已有 vv-icons 源码（`VV_TEST_ICONS`）及含 TypeScript、TSX、JavaScript、JSON parser 的 runtime（`VV_TEST_PARSERS`，默认原 data/site）。高亮 queries 必须包含继承的 `ecma` / `jsx` 文件；`VV_TEST_QUERIES` 可指定 query runtime，默认使用同目录 queries 或发现已有 nvim-treesitter 源码。不安装 parser。
+
+依赖发现、显式覆盖、隔离与 CI 检出要求见[共享测试入口](https://github.com/beixiyo/vv-utils.nvim/blob/main/dev/test/README.zh-CN.md)。headless 不替代真实 TUI 验证。

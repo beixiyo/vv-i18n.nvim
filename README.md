@@ -363,8 +363,12 @@ references = {
 `collect` returns `hit`, `dynamic`, `ambiguous`, or `missing` items with a zero-based `range`; see
 [`VVI18nReferenceResult`](lua/vv-i18n/types.lua) for the fields.
 
-## Tests
+## Development tests
 
-```bash
-bash tests/run.sh
+```sh
+./tests/run.sh [literal-filter]
 ```
+
+Requires Neovim 0.12+, Git, POSIX shell and an existing vv-utils checkout (development vendors, lazy or native pack; `VV_UTILS` overrides discovery). `NVIM_BIN` selects Neovim. Requires `rg`, existing vv-icons sources (`VV_TEST_ICONS`), and a runtime with TypeScript, TSX, JavaScript and JSON parsers (`VV_TEST_PARSERS`, default original data/site). Highlight queries must include their `ecma` / `jsx` inheritance files; `VV_TEST_QUERIES` selects the query runtime, otherwise colocated queries or an existing nvim-treesitter checkout are discovered. No parsers are installed.
+
+Dependency discovery, explicit overrides, isolation and CI checkout requirements: [shared test entry](https://github.com/beixiyo/vv-utils.nvim/blob/main/dev/test/README.md). Headless tests do not replace real TUI validation.

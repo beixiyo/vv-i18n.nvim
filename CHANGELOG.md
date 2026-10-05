@@ -1,115 +1,100 @@
 # Changelog
 
+## 0.1.8 - 2026-10-04
+
+### Changed
+
+- 引用侧栏扫描时显示动画与 `…` 计数，避免误报零引用
+- 无用 key 面板扫描动画改用 `vv-utils.loading`
+
 ## 0.1.7 - 2026-09-30
 
 ### Changed
 
-- 切换 buffer 的开销从约 25ms 降到约 1ms：
-  - 定义处引用数改为按文件反查，不再每次进入任意 buffer 都遍历全部 locale key
-  - 行内预览按 buffer 内容缓存，内容没变时只重绘、不重新解析；locale 重建或配置变更后照常重算
+- 优化定义引用数查询与行内预览缓存，buffer 切换开销从约 25ms 降至约 1ms
 
 ## 0.1.6 - 2026-09-26
 
 ### Added
 
-- 新增 `refresh_if_stale()`：locale 文件在磁盘上有变化时重建索引并刷新预览
+- 新增 `refresh_if_stale()`，检测磁盘 locale 变化并重建索引、刷新预览
 
 ### Fixed
 
-- locale 文件被外部工具或 Agent 改写后，行内预览不再一直显示缺失：切回 nvim、进入 buffer、编辑或保存时自动检测 locale 文件变化并重建索引
-- 手动 `:VVI18nReload` 后预览立即刷新，不再需要 toggle 一次
+- 外部改写 locale 后，切回 nvim、进入 buffer、编辑或保存时自动更新预览；`:VVI18nReload` 后也立即刷新
 
 ## 0.1.5 - 2026-09-18
 
 ### Added
 
-- 引用数图标独立高亮组 `VVI18nReferenceIcon`，数字默认色从主题 Statement 混色改为 link `Special`
-- 引用数标签文案可配置：`references.label`，默认 `'refs'`
-- 定义处引用数改为 combine 高亮模式，背景跟随底层行（光标行 cursorline 不再被截断成背景色块）
+- 新增引用图标高亮组 `VVI18nReferenceIcon` 与 `references.label`（默认 `'refs'`），引用数字默认高亮改为链接 `Special`
+- 定义处引用数保留底层行背景，不再截断 cursorline
 
 ### Fixed
 
-- 多 source 项目回归：调用点解析按 source `root` 划定辖区，文件只由所在 root 的 source 解析；
-  修复互斥包的 source 凭 no-binding 前缀造出竞争 key，把命中整体判 `ambiguous`，
-  导致行内预览与引用计数全部丢失的问题。绝对命名空间 `ns:key` 前缀无关、豁免辖区过滤；
-  不在任何 root 内的文件仍由全部 source 尝试（保留歧义保护）；空串 `root` 视为未配置
+- 多 source 调用解析按 `root` 隔离，修复跨包歧义导致预览和计数丢失；`ns:key` 豁免过滤，辖区外文件仍尝试全部 source，空串 `root` 视为未配置
 
 ## 0.1.4 - 2026-09-02
 
 ### Added
 
-- 光标位于 locale 文件的 key 定义处时，可直接操作该 key
-- 定义处引用数虚拟文本的数字改为独立高亮组 `VVI18nReferenceCount`
-- 新增 `ignore_key(full_key)`
+- 光标位于 locale key 定义处时可直接操作该 key
+- 新增引用数字高亮组 `VVI18nReferenceCount` 与 `ignore_key(full_key)`
 
 ## 0.1.3 - 2026-08-19
 
 ### Added
 
-- 新增 `:VVI18nUnused` 潜在无用 key 面板，支持逐项/批量复制审查材料及事务删除
-- 新增可配置引用 scanner adapter；内置 JS/TS scanner 与外部语言 scanner 共用统一证据契约
-- 动态模板、歧义调用和不可靠字符串转义会生成保护证据，避免把运行时 key 误判为可删除候选
-- 无用 key 复制内容支持自定义 renderer、定义语言选择、value 开关和紧凑中文 Markdown
-- keys、missing、references 与 unused 侧栏支持 `/` 实时筛选；可匹配 key、译文、文件路径与引用源码
+- 新增 `:VVI18nUnused` 潜在无用 key 面板，支持逐项/批量复制审查材料及事务删除，并可自定义复制格式
+- 新增引用 scanner adapter，内置 JS/TS 与外部语言 scanner 共用证据契约
+- 动态模板、歧义调用与不可靠字符串转义会保护相关 key，避免误删运行时 key
+- keys、missing、references 与 unused 侧栏支持 `/` 实时筛选 key、译文、路径与引用源码
 
 ### Changed
 
-- 引用索引按 registry/store/scanner 职责拆分，全量与增量扫描统一 latest-wins 生命周期
-- editor 与 info 浮窗复用 `vv-utils.ui_window`，扫描过程复用 `vv-utils.loading`
-- locale 写回统一文件操作流程，并支持安全删除 JSON/JS/TS 对象 key
-- 树形侧栏快捷键提示改用 `vv-utils.tree_panel` 固定多行 toolbar：按宽度完整换行、独立滚动
+- 全量与增量引用扫描统一为 latest-wins，扫描显示加载动画
+- locale 写回支持安全删除 JSON/JS/TS 对象 key
+- 树形侧栏快捷键提示使用固定多行 toolbar，支持按宽度换行与独立滚动
 
 ## 0.1.2 - 2026-08-04
 
 ### Fixed
 
-- 引用索引扫描改为 latest-wins：后续刷新或 clear 会物理终止旧的 `rg` 进程，并阻止已排队的旧回调重新写入索引
+- 后续引用刷新或 clear 会终止旧 `rg` 进程，过期回调不再写回索引
 
 ## 0.1.1 - 2026-07-26
 
 ### Added
 
-- 在 locale 原始定义处显示引用数虚拟文本
-- 新增 `:VVI18nReferences`，使用可折叠的 Trouble 风格侧栏浏览、预览并跳转当前 key 的全部引用
-- 引用计数和侧栏节点均支持自定义 render 函数
-- 引用查询可配置单个结果直接跳转，以及是否显示零引用虚拟文本
+- locale 定义处显示引用数，新增 `:VVI18nReferences` 可折叠侧栏浏览、预览并跳转引用
+- 引用计数与侧栏节点支持自定义 renderer，引用查询可配置单结果直接跳转与零引用显示
 
 ### Changed
 
-- 多语言编辑器改为单窗口固定输入槽，语言标签使用虚拟文本，保存后保持窗口打开
-- `<CR>` 在 Normal 和 Insert 模式下跳转当前语言定义，`<C-s>` 统一保存
-- 编辑器按数据模型、输入槽、跳转和生命周期拆分为 `editor/` 模块
-- `:VVI18nKeys` 复用 `vv-utils.tree_panel`，支持左右位置、持久宽度、自定义映射与渲染；顶部语言选择会即时切换下方 key 预览
-- 引用侧栏复用 `vv-utils.tree_panel` 的树模型、折叠状态、预览和跳转生命周期
-- 配置、项目发现、索引查询、命令和生命周期按职责拆分为独立模块
+- 多语言编辑器改为单窗口固定输入槽与虚拟语言标签，保存后保持打开；Normal / Insert 下 `<CR>` 跳转定义，`<C-s>` 保存
+- `:VVI18nKeys` 支持左右位置、持久宽度、自定义映射与渲染，语言选择即时更新 key 预览
 
 ### Fixed
 
 - 未保存内容跳转时给出英文提示，关闭时仅确认 `Yes` 后丢弃修改
-- 修复 Backspace 到输入槽边界后插入 `<Nop>` 的问题
-- 修复 `dd` 清空输入槽后光标落入语言标签区域、后续输入无效的问题
-- 修复多 split 场景跳转到错误窗口的问题
-- 编辑器跳转 locale 定义时关闭 keys panel，避免随后关闭 panel 又恢复最初的 buffer 与光标
-- 已打开的引用侧栏可直接切换到光标下的另一 key
-- 缺失语言分组的顶部统计按完整 key 去重
+- 修复输入槽边界 Backspace 插入 `<Nop>`、`dd` 后光标进入标签区域导致输入无效的问题
+- 修复多 split 跳错窗口，以及跳转定义后关闭 keys panel 恢复旧 buffer 与光标的问题
+- 已打开的引用侧栏可切换到光标下另一 key，缺失语言顶部统计按完整 key 去重
 
 ## 0.1.0 - 2026-07-13
 
 ### Added
 
-- `VVI18nInfo` 改为可聚焦的多语言预览窗口，支持编辑、重载和复制 key
-- 新增 `:VVI18nMissing`，直接打开仅缺失 key、按缺失语言分组的面板
-- 面板新增 `g?` 帮助窗口，复用 `vv-utils.help_panel`
+- `VVI18nInfo` 改为可聚焦多语言预览窗口，支持编辑、重载与复制 key
+- 新增 `:VVI18nMissing` 按缺失语言分组的面板，以及 `g?` 帮助窗口
 
 ### Changed
 
-- 面板支持从分组行或 key 行使用 `h/l`、方向键折叠展开，并复用 `vv-icons` 文件树图标
-- `g` 可在普通挂载点分组和缺失语言分组之间切换
-- 多语言编辑器使用固定值列和简洁英文提示；打开缺失项时直接聚焦对应语言的输入位置
-- 复数译文按 `one`、`other` 等 CLDR 形态展开为独立可编辑行，单行预览优先展示 `other`
+- 面板支持在分组或 key 行用 `h/l`、方向键折叠展开，使用 `vv-icons` 文件树图标；`g` 切换挂载点与缺失语言分组
+- 多语言编辑器使用固定值列和简洁英文提示，缺失项直接聚焦对应语言输入位置
+- CLDR 复数形态展开为独立可编辑行，单行预览优先展示 `other`
 
 ### Fixed
 
-- `display`：`ft_match` 在 `vim.schedule` 延迟回调里可能拿到已被 wipe 的 buffer id（瞬态 buffer 一开即关），裸读 `vim.bo[bufnr]` 抛 `Invalid buffer id`。补 `nvim_buf_is_valid` 守卫
-- 修复复数对象父 key 被误报为缺失，保存时触发 `key-exists` 的问题
-- 修复缺失项编辑器光标停在行首、空值行看不出输入位置的问题
+- 瞬态 buffer 被 wipe 后的预览回调不再报 `Invalid buffer id`
+- 修复复数父 key 误报缺失并在保存时触发 `key-exists`，以及缺失项光标与空值输入位置不清晰的问题

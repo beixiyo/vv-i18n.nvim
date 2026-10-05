@@ -6,9 +6,7 @@
 --   flat-app —— flat 布局（无命名空间）+ 中性默认
 local H = {}
 
-local src = debug.getinfo(1, 'S').source:sub(2)
-local TESTS_DIR = src:match('(.*)/[^/]*$')
-H.FIXTURES = TESTS_DIR .. '/fixtures'
+H.FIXTURES = assert(vim.uv.fs_realpath(assert(vim.env.VV_TEST_TMP) .. '/fixtures'))
 
 function H.fixture(rel)
   return H.FIXTURES .. '/' .. rel
@@ -68,17 +66,9 @@ function H.flat_config()
 end
 
 function H.checker()
-  local pass, fail = 0, 0
-  local function check(name, ok, extra)
-    if ok then pass = pass + 1; print('PASS: ' .. name)
-    else fail = fail + 1; print('FAIL: ' .. name .. (extra and ('  → ' .. tostring(extra)) or '')) end
+  return function(name, ok, extra)
+    assert(ok, name .. (extra and ('：' .. tostring(extra)) or ''))
   end
-  local function done()
-    print(('== %d PASS / %d FAIL =='):format(pass, fail))
-    if fail > 0 then vim.cmd('cquit! 1') end
-    return pass, fail
-  end
-  return check, done
 end
 
 return H
