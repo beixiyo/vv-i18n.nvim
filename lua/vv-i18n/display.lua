@@ -140,20 +140,25 @@ local function ft_match(bufnr, ft_list)
 end
 
 --- 给窗口装上 conceal（首次保存原值），译文才能隐藏原 key
+--- 只写窗口局部值：vim.wo[win].x = v 等同 :set，会连全局值一起改，之后新建的窗口
+--- （vv-git diff 等）都会继承 conceallevel=2，markdown 的 conceal_lines 在 wrap 窗口里
+--- 逐行触发 treesitter 解析，大文件打开即卡数秒
+--- 局部值跟随「窗口 + buffer」：同窗口 :e 新 buffer 会回落到窗口的全局副本，
+--- 所以原值只存一次，但每次进入匹配 buffer 都要重新设置
 local function set_conceal(win)
-  if touched[win] then return end
-  touched[win] = { cl = vim.wo[win].conceallevel, cc = vim.wo[win].concealcursor }
-  vim.wo[win].conceallevel = 2
-  vim.wo[win].concealcursor = 'nvic'   -- 始终 conceal，还原全靠 token 级删 extmark
+  if not touched[win] then
+    touched[win] = { cl = vim.wo[win].conceallevel, cc = vim.wo[win].concealcursor }
+  end
+  vim.api.nvim_set_option_value('conceallevel', 2, { win = win, scope = 'local' })
+  -- 始终 conceal，还原全靠 token 级删 extmark
+  vim.api.nvim_set_option_value('concealcursor', 'nvic', { win = win, scope = 'local' })
 end
 
 local function restore_conceal()
   for win, saved in pairs(touched) do
     if vim.api.nvim_win_is_valid(win) then
-      pcall(function()
-        vim.wo[win].conceallevel = saved.cl
-        vim.wo[win].concealcursor = saved.cc
-      end)
+      pcall(vim.api.nvim_set_option_value, 'conceallevel', saved.cl, { win = win, scope = 'local' })
+      pcall(vim.api.nvim_set_option_value, 'concealcursor', saved.cc, { win = win, scope = 'local' })
     end
   end
   touched = {}

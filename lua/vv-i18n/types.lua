@@ -140,4 +140,90 @@
 ---@field help? false|VVTreePanelHelpOptions
 ---@field render? VVTreePanelRenderers
 
+---@class VVI18nSetupOpts  setup 入参：VVI18nConfig 的递归 partial，缺省字段由 config.make 合并默认值
+---@field root? string
+---@field sources? VVI18nSource[]
+---@field hooks? string[]
+---@field t? string[]
+---@field lang? string|string[]|function
+---@field mount? string|function
+---@field namespace? string|function
+---@field namespace_separator? string
+---@field key_separator? string
+---@field ignore_key? fun(full_key: string): boolean
+---@field quote_style? 'single'|'double'|'auto'
+---@field indent? string
+---@field display? VVI18nDisplaySetupOpts
+---@field panel? VVI18nKeyPanelSetupOpts
+---@field references? VVI18nReferencesSetupOpts
+---@field unused? VVI18nUnusedSetupOpts
+---@field ft? string[]
+---@field project_config? boolean
+---@field parse? fun(content: string, path: string): table?
+
+---@class VVI18nDisplaySetupOpts
+---@field enable? boolean
+---@field lang? string
+---@field preferred_langs? string[]
+---@field max_width? integer
+---@field icon? string
+---@field missing_icon? string
+---@field hl? string
+---@field missing_hl? string
+---@field style? vim.api.keyset.highlight
+---@field missing_style? vim.api.keyset.highlight
+---@field render? fun(ctx: VVI18nRenderCtx): (string|table[]|nil)
+
+---@class VVI18nKeyPanelSetupOpts
+---@field width? integer
+---@field position? 'left'|'right'
+---@field state? VVStateHandle
+---@field mappings? false|VVTreePanelMappings
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)
+---@field help? false|VVTreePanelHelpOptions
+---@field render? VVTreePanelRenderers
+
+---@class VVI18nReferencesSetupOpts
+---@field enable? boolean
+---@field icon? string
+---@field icon_hl? string
+---@field icon_style? vim.api.keyset.highlight
+---@field label? string
+---@field hl? string
+---@field count_hl? string
+---@field count_style? vim.api.keyset.highlight
+---@field jump_single? boolean
+---@field show_zero? boolean
+---@field render? fun(ctx: table): (string|table[]|nil)
+---@field scanners? VVI18nReferenceScanner[]
+---@field panel? VVI18nReferencesPanelSetupOpts
+
+---@class VVI18nReferencesPanelSetupOpts
+---@field width? integer
+---@field position? 'left'|'right'
+---@field preview_debounce_ms? integer
+---@field state? VVStateHandle
+---@field mappings? false|VVTreePanelMappings
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)
+---@field help? false|VVTreePanelHelpOptions
+---@field render? fun(ctx: VVTreePanelRenderContext): VVTreePanelRenderRow|string
+
+---@class VVI18nUnusedSetupOpts
+---@field copy? VVI18nUnusedCopySetupOpts
+---@field panel? VVI18nUnusedPanelSetupOpts
+
+---@class VVI18nUnusedCopySetupOpts
+---@field render? fun(ctx: table): string
+---@field definition_language? string
+---@field include_values? boolean
+
+---@class VVI18nUnusedPanelSetupOpts
+---@field width? integer
+---@field position? 'left'|'right'
+---@field state? VVStateHandle
+---@field mappings? false|VVTreePanelMappings
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)
+---@field help? false|VVTreePanelHelpOptions
+---@field render? VVTreePanelRenderers
+
 return {}

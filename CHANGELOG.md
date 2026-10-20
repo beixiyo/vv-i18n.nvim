@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.9 - 2026-10-20
+
+### Added
+
+- 新增 `VVI18nSetupOpts` 等 setup 入参类型（配置的递归 partial），`setup` / `config.make` 标注入参与返回类型
+
+### Fixed
+
+- 行内预览只设置窗口局部的 `conceallevel` / `concealcursor`，不再改写全局副本；修复之后新建的窗口（如 vv-git diff）继承 `conceallevel=2`，导致大 markdown 逐行解析卡顿数秒
+- 同一窗口切换到其他匹配 buffer 时重新开启 conceal，避免原 key 与译文同时显示
+
 ## 0.1.8 - 2026-10-04
 
 ### Changed

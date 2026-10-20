@@ -40,6 +40,7 @@ end
 ---@param content string
 ---@return string kind
 ---@return string value  string→解码值；否则原始文本
+---@return boolean? reliable  仅 string 分支返回，解码是否可靠还原（调用方当前忽略）
 local function classify(vnode, content)
   local t = vnode:type()
   if t == 'string' then

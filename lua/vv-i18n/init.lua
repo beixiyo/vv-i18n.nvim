@@ -9,6 +9,7 @@ local Lifecycle = require('vv-i18n.service.lifecycle')
 local M = {}
 local state = Runtime.new()
 
+---@param opts? VVI18nSetupOpts
 function M.setup(opts) return Lifecycle.setup(state, M, opts) end
 
 function M.reload() return Lifecycle.reload(state, M) end

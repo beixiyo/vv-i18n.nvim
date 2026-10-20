@@ -86,6 +86,8 @@ local defaults = {
 local current = vim.deepcopy(defaults)
 local base = vim.deepcopy(defaults)
 
+---@param opts? VVI18nSetupOpts
+---@return VVI18nConfig
 function M.make(opts)
   local cfg = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
   if opts then
@@ -111,6 +113,8 @@ function M.make(opts)
   return cfg
 end
 
+---@param opts? VVI18nSetupOpts
+---@return VVI18nConfig
 function M.setup(opts)
   base = M.make(opts)
   current = vim.deepcopy(base)
