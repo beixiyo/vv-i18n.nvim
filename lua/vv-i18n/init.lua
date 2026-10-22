@@ -9,8 +9,9 @@ local Lifecycle = require('vv-i18n.service.lifecycle')
 local M = {}
 local state = Runtime.new()
 
----@param opts? VVI18nSetupOpts
-function M.setup(opts) return Lifecycle.setup(state, M, opts) end
+---@param opts? VVI18nOpts
+---@param deps? VVI18nDeps 运行时依赖（如面板 state 句柄），不属于用户配置
+function M.setup(opts, deps) Lifecycle.setup(state, M, opts, deps) end
 
 function M.reload() return Lifecycle.reload(state, M) end
 

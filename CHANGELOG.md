@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 - 2026-10-22
+
+### Breaking
+
+- 三个面板的 `state` 改由 `setup(opts, deps)` 注入（`deps.panel_state`、`deps.references_state`、`deps.unused_state`），opts 与 `.vv-i18n.lua` 中的 `state` 不再生效
+- `setup()` 不再返回配置，需要时用 `get_config()`
+
+### Changed
+
+- 输入类型统一为 `VVI18nOpts`，移除手抄的 `*SetupOpts`，不保留别名
+- `config.make()` 去掉重复合并，`setup(opts)` 与 `.vv-i18n.lua` 仍共用 `make()`
+
 ## 0.1.9 - 2026-10-20
 
 ### Added

@@ -20,9 +20,10 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     })
 
     local config = H.ns_config()
+    -- state 句柄是运行时依赖，经 setup 第二参数注入
+    local deps = { references_state = references_state }
     config.references = {
       panel = {
-        state = references_state,
         mappings = {
           za = 'toggle_node',
           zR = 'expand_all',
@@ -30,14 +31,14 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
         },
       },
     }
-    i18n.setup(config)
-    i18n.setup(config)
+    i18n.setup(config, deps)
+    i18n.setup(config, deps)
     local display_autocmds = vim.api.nvim_get_autocmds({ group = 'VVI18nReferencesDisplay' })
     check('重配不叠加 references display autocmd', #display_autocmds == 2, #display_autocmds)
 
     local disabled_config = vim.deepcopy(config)
     disabled_config.references.enable = false
-    i18n.setup(disabled_config)
+    i18n.setup(disabled_config, deps)
     local has_index_listener = pcall(vim.api.nvim_get_autocmds, { group = 'VVI18nReferencesIndex' })
     check('references=false 不注册 index listener 且 display 已释放', not has_index_listener
       and not ReferenceDisplay.is_enabled())
@@ -93,7 +94,7 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     check('重配 root 时立即撤销旧引用快照', #References.get('greeting.hello') == 0)
     vim.fn.delete(transition_root, 'rf')
 
-    i18n.setup(config)
+    i18n.setup(config, deps)
     i18n.reload()
 
     check('命令 VVI18nReferences 注册', vim.fn.exists(':VVI18nReferences') == 2)
@@ -163,12 +164,12 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
 
     local failing_config = vim.deepcopy(config)
     failing_config.references.panel.on_attach = function() error('attach failed') end
-    i18n.setup(failing_config)
+    i18n.setup(failing_config, deps)
     local windows_before_failed_open = #vim.api.nvim_list_wins()
     local failed_open = pcall(vim.cmd, 'VVI18nReferences')
     check('引用侧栏 attach 异常会回滚窗口', not failed_open
       and #vim.api.nvim_list_wins() == windows_before_failed_open)
-    i18n.setup(config)
+    i18n.setup(config, deps)
 
     local snapshot = i18n.get_config()
     snapshot.references.panel.on_attach = function() error('不得泄漏') end
@@ -247,7 +248,7 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     end
     local default_mapping_config = vim.deepcopy(config)
     default_mapping_config.references.panel.mappings = nil
-    i18n.setup(default_mapping_config)
+    i18n.setup(default_mapping_config, deps)
     vim.cmd('VVI18nReferences')
     check('不同 key 共用引用侧栏宽度状态', vim.api.nvim_win_get_width(0) == resized_width,
       vim.api.nvim_win_get_width(0))
@@ -298,7 +299,7 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     local direct_config = vim.deepcopy(default_mapping_config)
     direct_config.references.jump_single = true
     direct_config.references.show_zero = true
-    i18n.setup(direct_config)
+    i18n.setup(direct_config, deps)
     i18n.reload()
     check('重配后引用扫描完成', vim.wait(3000, function() return not References.is_scanning() end))
 

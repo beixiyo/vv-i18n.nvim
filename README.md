@@ -201,7 +201,6 @@ require('vv-i18n').setup({
   panel = {
     width = 56,
     position = 'right',
-    state = nil,                       -- Defaults to the shared vv-i18n/keys state
     mappings = nil,                    -- nil=defaults, false=none, table=replace
     on_attach = nil,
     help = nil,
@@ -224,7 +223,6 @@ require('vv-i18n').setup({
       width = 62,
       position = 'right',
       preview_debounce_ms = 80,
-      state = nil,
       mappings = nil,
       on_attach = nil,
       help = nil,
@@ -240,7 +238,6 @@ require('vv-i18n').setup({
     panel = {
       width = 68,
       position = 'right',
-      state = nil,
       mappings = nil,
       on_attach = nil,
       help = nil,
@@ -250,6 +247,17 @@ require('vv-i18n').setup({
   ft = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
   project_config = true,               -- Load a trusted .vv-i18n.lua
   parse = nil,                         -- Custom read-side parser
+})
+```
+
+Panel width state handles are runtime dependencies, not options. Pass them as the second `setup` argument (`VVI18nDeps`); when omitted, each panel uses its shared `vv-i18n/keys`, `vv-i18n/references`, or `vv-i18n/unused` state. A project `.vv-i18n.lua` does not change them:
+
+```lua
+local State = require('vv-utils.state')
+require('vv-i18n').setup(opts, {
+  panel_state = State.register('my-config', 'i18n-keys'),
+  references_state = nil,
+  unused_state = nil,
 })
 ```
 

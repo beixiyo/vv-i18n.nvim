@@ -22,8 +22,7 @@ T["编辑计划、写回预检与键面板窗口交互"] = function()
     local orig = H.read(HERO_ZH)
 
     local config = H.ns_config()
-    config.panel = { state = panel_state }
-    i18n.setup(config)
+    i18n.setup(config, { panel_state = panel_state })
     i18n.reload()
 
     -- editor.plan：已存在键 → 各语言行（en-US < zh-CN 字典序）

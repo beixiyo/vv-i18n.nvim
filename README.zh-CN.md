@@ -197,7 +197,6 @@ require('vv-i18n').setup({
   panel = {
     width = 56,
     position = 'right',
-    state = nil,                       -- 默认使用共享状态 vv-i18n/keys
     mappings = nil,                    -- nil=默认，false=不注册，table=完整替换
     on_attach = nil,
     help = nil,
@@ -220,7 +219,6 @@ require('vv-i18n').setup({
       width = 62,
       position = 'right',
       preview_debounce_ms = 80,
-      state = nil,
       mappings = nil,
       on_attach = nil,
       help = nil,
@@ -236,7 +234,6 @@ require('vv-i18n').setup({
     panel = {
       width = 68,
       position = 'right',
-      state = nil,
       mappings = nil,
       on_attach = nil,
       help = nil,
@@ -246,6 +243,17 @@ require('vv-i18n').setup({
   ft = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
   project_config = true,               -- 加载可信的 .vv-i18n.lua
   parse = nil,                         -- 自定义读侧解析器
+})
+```
+
+面板宽度的 state 句柄属于运行时依赖，不属于配置项。通过 `setup` 第二参数（`VVI18nDeps`）注入；未传时各面板使用共享状态 `vv-i18n/keys`、`vv-i18n/references`、`vv-i18n/unused`。项目 `.vv-i18n.lua` 不会改变它们：
+
+```lua
+local State = require('vv-utils.state')
+require('vv-i18n').setup(opts, {
+  panel_state = State.register('my-config', 'i18n-keys'),
+  references_state = nil,
+  unused_state = nil,
 })
 ```
 

@@ -42,9 +42,9 @@ local function build_chunks(plugin, config, r)
   end
 
   if hit then
-    return { { (d.icon or '') .. truncate(value, d.max_width), hl } }
+    return { { d.icon .. truncate(value, d.max_width), hl } }
   end
-  return { { (d.missing_icon or '⚠ ') .. (r.literal or r.full_key), hl } }
+  return { { d.missing_icon .. (r.literal or r.full_key), hl } }
 end
 
 --- 计算某 buffer 的预览项（纯函数，不依赖光标）

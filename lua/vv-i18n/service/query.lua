@@ -153,7 +153,7 @@ local function preferred_lang(state, langs)
   local available = {}
   for _, lang in ipairs(sorted) do available[lang] = true end
   if state.config.display.lang and available[state.config.display.lang] then return state.config.display.lang end
-  for _, lang in ipairs(state.config.display.preferred_langs or {}) do
+  for _, lang in ipairs(state.config.display.preferred_langs) do
     if available[lang] then return lang end
   end
   return sorted[1]

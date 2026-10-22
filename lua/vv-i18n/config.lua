@@ -1,4 +1,5 @@
--- 配置归属模块；调用方只能获取深拷贝快照
+-- 配置归属模块：setup(opts) 与项目根 .vv-i18n.lua 共用同一个 make() 归一化
+-- 调用方只能获取深拷贝快照；运行时依赖（state 句柄）由 setup 第二参数注入，合并后派生
 local M = {}
 
 ---@type VVI18nConfig
@@ -31,7 +32,6 @@ local defaults = {
   panel = {
     width = 56,
     position = 'right',
-    state = nil,
     mappings = nil,
     on_attach = nil,
     help = nil,
@@ -53,8 +53,7 @@ local defaults = {
     panel = {
       width = 62,
       position = 'right',
-      preview_debounce_ms = 80,
-      state = nil,
+      preview_debounce_ms = nil, -- nil 交给 vv-utils tree_panel 的默认值
       mappings = nil,
       on_attach = nil,
       help = nil,
@@ -70,7 +69,6 @@ local defaults = {
     panel = {
       width = 68,
       position = 'right',
-      state = nil,
       mappings = nil,
       on_attach = nil,
       help = nil,
@@ -83,53 +81,69 @@ local defaults = {
 }
 
 
+-- 列表字段：给出即整体替换（含空数组），不依赖 tbl_deep_extend 的列表判定
+local replace_keys = { 'sources', 't', 'hooks', 'ft', 'lang', 'mount', 'namespace' }
+
+---@type VVI18nDeps
+local deps = {}
+
 local current = vim.deepcopy(defaults)
 local base = vim.deepcopy(defaults)
 
----@param opts? VVI18nSetupOpts
+--- 把用户输入（setup 或 .vv-i18n.lua）归一化为完整配置，并挂上 deps 派生的 state
+---@param opts? VVI18nOpts
 ---@return VVI18nConfig
 function M.make(opts)
   local cfg = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
+
   if opts then
-    for _, key in ipairs({ 'sources', 't', 'hooks', 'ft', 'lang', 'mount', 'namespace' }) do
+    for _, key in ipairs(replace_keys) do
       if opts[key] ~= nil then cfg[key] = opts[key] end
     end
+
     if opts.display and opts.display.preferred_langs ~= nil then
       cfg.display.preferred_langs = opts.display.preferred_langs
     end
-    if opts.panel ~= nil then
-      cfg.panel = vim.tbl_deep_extend('force', vim.deepcopy(defaults.panel), opts.panel)
-    end
-    if opts.references and opts.references.panel ~= nil then
-      cfg.references.panel = vim.tbl_deep_extend('force', vim.deepcopy(defaults.references.panel), opts.references.panel)
-    end
-    if opts.unused ~= nil then
-      cfg.unused = vim.tbl_deep_extend('force', vim.deepcopy(defaults.unused), opts.unused)
-      if opts.unused.panel ~= nil then
-        cfg.unused.panel = vim.tbl_deep_extend('force', vim.deepcopy(defaults.unused.panel), opts.unused.panel)
-      end
-    end
   end
+
+  -- 派生值：合并后再赋值；nil 时由各面板使用自身的共享状态
+  cfg.panel.state = deps.panel_state
+  cfg.references.panel.state = deps.references_state
+  cfg.unused.panel.state = deps.unused_state
+
   return cfg
 end
 
----@param opts? VVI18nSetupOpts
+---@param opts? VVI18nOpts
+---@param runtime_deps? VVI18nDeps 运行时依赖（如 state 句柄），不属于用户配置
 ---@return VVI18nConfig
-function M.setup(opts)
+function M.setup(opts, runtime_deps)
+  deps = runtime_deps or {}
   base = M.make(opts)
   current = vim.deepcopy(base)
   return M.snapshot()
 end
 
+--- 项目配置（.vv-i18n.lua）激活或回落到 setup 配置；与 setup 走同一个 make()
+---@param opts? VVI18nOpts
+---@return VVI18nConfig
 function M.activate(opts)
-  current = M.make(opts or base)
+  -- base 已经过 make()，回落时直接复制，结果与再归一化一次相同
+  if opts then
+    current = M.make(opts)
+  else
+    current = vim.deepcopy(base)
+  end
+
   return M.snapshot()
 end
 
+---@return VVI18nConfig
 function M.base()
   return vim.deepcopy(base)
 end
 
+---@return VVI18nConfig
 function M.snapshot()
   return vim.deepcopy(current)
 end

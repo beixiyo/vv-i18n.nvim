@@ -30,7 +30,7 @@
 ---@field unused VVI18nUnusedConfig
 ---@field ft string[]            生效文件类型 @default ts/tsx/js/jsx
 ---@field project_config boolean 探测项目根 .vv-i18n.lua（首次信任后全覆盖本配置） @default true
----@field parse? fun(content: string, path: string): table?  自定义读侧解析（YAML/PO 等）；返回 { leaves: VVI18nLeaf[], top_keys?: string[] }。nil=默认 tree-sitter（JS/JSON）
+---@field parse? fun(content: string, path: string): table?  自定义读侧解析（YAML/PO 等）；返回 { leaves: VVI18nLeaf[], top_keys?: string[] }。nil=默认 tree-sitter（JS/JSON） @default nil
 
 ---@class VVI18nLeaf  自定义 parse 须返回的叶子（与默认 reader 同形）
 ---@field path string[]          文件内逐层 key，如 { 'hero', 'title' }
@@ -50,18 +50,20 @@
 ---@field missing_icon string    @default '⚠ '
 ---@field hl string              译文高亮组 @default 'VVI18nPreview'
 ---@field missing_hl string      缺失高亮组 @default 'VVI18nMissing'
----@field style? vim.api.keyset.highlight  直接定义译文样式；nil=默认 注释色+斜体
----@field missing_style? vim.api.keyset.highlight  缺失样式；nil=默认 link DiagnosticVirtualTextWarn
----@field render? fun(ctx: VVI18nRenderCtx): (string|table[]|nil)  自定义渲染：返回字符串 / virt_text chunks / nil(落默认)
+---@field style? vim.api.keyset.highlight  直接定义译文样式；nil=默认 注释色+斜体 @default nil
+---@field missing_style? vim.api.keyset.highlight  缺失样式；nil=默认 link DiagnosticVirtualTextWarn @default nil
+---@field render? fun(ctx: VVI18nRenderCtx): (string|table[]|nil)  自定义渲染：返回字符串 / virt_text chunks / nil(落默认) @default nil
 
----@class VVI18nKeyPanelConfig
+---@class VVI18nKeyPanelSettings
 ---@field width integer          键浏览侧栏宽度 @default 56
 ---@field position 'left'|'right'  侧栏位置 @default 'right'
----@field state? VVStateHandle   宽度持久状态；默认注册 vv-i18n/keys @default nil
----@field mappings? false|VVTreePanelMappings  快捷键；table=完全自定义，false=不注册 @default nil
----@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口
+---@field mappings? false|VVTreePanelMappings  快捷键；nil=默认，table=完全自定义，false=不注册 @default nil
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口 @default nil
 ---@field help? false|VVTreePanelHelpOptions  g? 帮助面板配置 @default nil
----@field render? VVTreePanelRenderers  winbar/header/node/empty/footer 自定义渲染
+---@field render? VVTreePanelRenderers  winbar/header/node/empty/footer 自定义渲染 @default nil
+
+---@class VVI18nKeyPanelConfig: VVI18nKeyPanelSettings
+---@field state? VVStateHandle   宽度持久状态；合并后派生，由 setup 第二参数 deps.panel_state 注入，未给时面板使用共享状态 vv-i18n/keys
 
 ---@class VVI18nRenderCtx  display.render 收到的上下文
 ---@field full_key string        完整键（含前缀/命名空间）
@@ -83,10 +85,10 @@
 ---@field label string           计数标签文案 @default 'refs'
 ---@field hl string              定义处引用数文字高亮 @default 'Comment'
 ---@field count_hl string        定义处引用数数字高亮组 @default 'VVI18nReferenceCount'
----@field count_style? vim.api.keyset.highlight  数字样式；nil=link Special
+---@field count_style? vim.api.keyset.highlight  数字样式；nil=link Special @default nil
 ---@field jump_single boolean    单个引用时直接跳转，不打开侧栏 @default false
 ---@field show_zero boolean      是否显示零引用虚拟文本 @default false
----@field render? fun(ctx: table): (string|table[]|nil)  定义处虚拟文本自定义渲染
+---@field render? fun(ctx: table): (string|table[]|nil)  定义处虚拟文本自定义渲染 @default nil
 ---@field scanners VVI18nReferenceScanner[]  附加引用 scanner；相同扩展名覆盖内置 JS/TS scanner @default {}
 ---@field panel VVI18nReferencesPanelConfig
 
@@ -112,118 +114,59 @@
 ---@field prefix? string         dynamic 的静态固定前缀
 ---@field full_keys? string[]    ambiguous 的所有可能完整 key
 
----@class VVI18nReferencesPanelConfig
+---@class VVI18nReferencesPanelSettings
 ---@field width integer          侧栏宽度 @default 62
 ---@field position 'left'|'right'  侧栏位置 @default 'right'
----@field preview_debounce_ms integer  光标预览防抖 @default 80
----@field state? VVStateHandle   侧栏状态；默认注册 vv-i18n/references @default nil
----@field mappings? false|VVTreePanelMappings  快捷键；table=完全自定义，false=不注册 @default nil
----@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口
+---@field preview_debounce_ms? integer  光标预览防抖；未配置时使用 vv-utils tree_panel 的默认值 @default nil
+---@field mappings? false|VVTreePanelMappings  快捷键；nil=默认，table=完全自定义，false=不注册 @default nil
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口 @default nil
 ---@field help? false|VVTreePanelHelpOptions  g? 帮助面板配置 @default nil
----@field render? fun(ctx: VVTreePanelRenderContext): VVTreePanelRenderRow|string  节点自定义渲染
+---@field render? fun(ctx: VVTreePanelRenderContext): VVTreePanelRenderRow|string  节点自定义渲染 @default nil
+
+---@class VVI18nReferencesPanelConfig: VVI18nReferencesPanelSettings
+---@field state? VVStateHandle   侧栏状态；合并后派生，由 setup 第二参数 deps.references_state 注入，未给时面板使用共享状态 vv-i18n/references
 
 ---@class VVI18nUnusedConfig
 ---@field copy VVI18nUnusedCopyConfig
 ---@field panel VVI18nUnusedPanelConfig
 
 ---@class VVI18nUnusedCopyConfig
----@field render? fun(ctx: table): string  自定义复制内容；nil=紧凑 Markdown 审查提示
+---@field render? fun(ctx: table): string  自定义复制内容；nil=紧凑 Markdown 审查提示 @default nil
 ---@field definition_language string  定义路径和值使用的语言；'all'=全部，缺失时稳定回退到首个语言 @default 'en'
 ---@field include_values boolean  是否在定义路径后输出该语言的翻译值 @default false
 
----@class VVI18nUnusedPanelConfig
----@field width integer @default 68
----@field position 'left'|'right' @default 'right'
----@field state? VVStateHandle
----@field mappings? false|VVTreePanelMappings
----@field on_attach? fun(panel: VVTreePanel, buf: integer)
----@field help? false|VVTreePanelHelpOptions
----@field render? VVTreePanelRenderers
+---@class VVI18nUnusedPanelSettings
+---@field width integer          侧栏宽度 @default 68
+---@field position 'left'|'right'  侧栏位置 @default 'right'
+---@field mappings? false|VVTreePanelMappings  快捷键；nil=默认，table=完全自定义，false=不注册 @default nil
+---@field on_attach? fun(panel: VVTreePanel, buf: integer)  panel buffer 配置入口 @default nil
+---@field help? false|VVTreePanelHelpOptions  g? 帮助面板配置 @default nil
+---@field render? VVTreePanelRenderers  winbar/header/node/empty/footer 自定义渲染 @default nil
 
----@class VVI18nSetupOpts  setup 入参：VVI18nConfig 的递归 partial，缺省字段由 config.make 合并默认值
----@field root? string
----@field sources? VVI18nSource[]
----@field hooks? string[]
----@field t? string[]
----@field lang? string|string[]|function
----@field mount? string|function
----@field namespace? string|function
----@field namespace_separator? string
----@field key_separator? string
----@field ignore_key? fun(full_key: string): boolean
----@field quote_style? 'single'|'double'|'auto'
----@field indent? string
----@field display? VVI18nDisplaySetupOpts
----@field panel? VVI18nKeyPanelSetupOpts
----@field references? VVI18nReferencesSetupOpts
----@field unused? VVI18nUnusedSetupOpts
----@field ft? string[]
----@field project_config? boolean
----@field parse? fun(content: string, path: string): table?
+---@class VVI18nUnusedPanelConfig: VVI18nUnusedPanelSettings
+---@field state? VVStateHandle   侧栏状态；合并后派生，由 setup 第二参数 deps.unused_state 注入，未给时面板使用共享状态 vv-i18n/unused
 
----@class VVI18nDisplaySetupOpts
----@field enable? boolean
----@field lang? string
----@field preferred_langs? string[]
----@field max_width? integer
----@field icon? string
----@field missing_icon? string
----@field hl? string
----@field missing_hl? string
----@field style? vim.api.keyset.highlight
----@field missing_style? vim.api.keyset.highlight
----@field render? fun(ctx: VVI18nRenderCtx): (string|table[]|nil)
+---@class VVI18nDeps  运行时依赖，不属于用户配置，不进入 VVI18nOpts，也不受 .vv-i18n.lua 影响
+---@field panel_state? VVStateHandle       键浏览面板宽度持久句柄
+---@field references_state? VVStateHandle  引用侧栏宽度持久句柄
+---@field unused_state? VVStateHandle      无用 key 面板宽度持久句柄
 
----@class VVI18nKeyPanelSetupOpts
----@field width? integer
----@field position? 'left'|'right'
----@field state? VVStateHandle
----@field mappings? false|VVTreePanelMappings
----@field on_attach? fun(panel: VVTreePanel, buf: integer)
----@field help? false|VVTreePanelHelpOptions
----@field render? VVTreePanelRenderers
-
----@class VVI18nReferencesSetupOpts
----@field enable? boolean
----@field icon? string
----@field icon_hl? string
----@field icon_style? vim.api.keyset.highlight
----@field label? string
----@field hl? string
----@field count_hl? string
----@field count_style? vim.api.keyset.highlight
----@field jump_single? boolean
----@field show_zero? boolean
----@field render? fun(ctx: table): (string|table[]|nil)
----@field scanners? VVI18nReferenceScanner[]
----@field panel? VVI18nReferencesPanelSetupOpts
-
----@class VVI18nReferencesPanelSetupOpts
----@field width? integer
----@field position? 'left'|'right'
----@field preview_debounce_ms? integer
----@field state? VVStateHandle
----@field mappings? false|VVTreePanelMappings
----@field on_attach? fun(panel: VVTreePanel, buf: integer)
----@field help? false|VVTreePanelHelpOptions
----@field render? fun(ctx: VVTreePanelRenderContext): VVTreePanelRenderRow|string
-
----@class VVI18nUnusedSetupOpts
----@field copy? VVI18nUnusedCopySetupOpts
----@field panel? VVI18nUnusedPanelSetupOpts
-
----@class VVI18nUnusedCopySetupOpts
----@field render? fun(ctx: table): string
----@field definition_language? string
----@field include_values? boolean
-
----@class VVI18nUnusedPanelSetupOpts
----@field width? integer
----@field position? 'left'|'right'
----@field state? VVStateHandle
----@field mappings? false|VVTreePanelMappings
----@field on_attach? fun(panel: VVTreePanel, buf: integer)
----@field help? false|VVTreePanelHelpOptions
----@field render? VVTreePanelRenderers
+-- 输入类型：由 Config 派生（面板取不含派生值 state 的 Settings），嵌套表各自 partial
+-- setup(opts) 与项目根 .vv-i18n.lua 的返回值都是 VVI18nOpts，走同一套归一化
+---@class (partial) VVI18nDisplayOpts: VVI18nDisplayConfig
+---@class (partial) VVI18nKeyPanelOpts: VVI18nKeyPanelSettings
+---@class (partial) VVI18nReferencesPanelOpts: VVI18nReferencesPanelSettings
+---@class (partial) VVI18nReferencesOpts: VVI18nReferencesConfig
+---@field panel? VVI18nReferencesPanelOpts
+---@class (partial) VVI18nUnusedCopyOpts: VVI18nUnusedCopyConfig
+---@class (partial) VVI18nUnusedPanelOpts: VVI18nUnusedPanelSettings
+---@class (partial) VVI18nUnusedOpts: VVI18nUnusedConfig
+---@field copy? VVI18nUnusedCopyOpts
+---@field panel? VVI18nUnusedPanelOpts
+---@class (partial) VVI18nOpts: VVI18nConfig
+---@field display? VVI18nDisplayOpts
+---@field panel? VVI18nKeyPanelOpts
+---@field references? VVI18nReferencesOpts
+---@field unused? VVI18nUnusedOpts
 
 return {}

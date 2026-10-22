@@ -89,7 +89,9 @@ function M.refresh_if_stale(state, plugin)
   return true
 end
 
-function M.setup(state, plugin, opts)
+---@param opts? VVI18nOpts
+---@param deps? VVI18nDeps
+function M.setup(state, plugin, opts, deps)
   state.setup_epoch = state.setup_epoch + 1
   local epoch = state.setup_epoch
 
@@ -99,7 +101,8 @@ function M.setup(state, plugin, opts)
   pcall(vim.api.nvim_del_augroup_by_name, 'VVI18nReferencesIndex')
 
   local had_indexes = state.indexes ~= nil
-  Runtime.set_config(state, Config.setup(opts or {}))
+  local config = Config.setup(opts, deps)
+  Runtime.set_config(state, config)
   if had_indexes and not state.indexes then References.clear() end
 
   if not state.config.references.enable then
