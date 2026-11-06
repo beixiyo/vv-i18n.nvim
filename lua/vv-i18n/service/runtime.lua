@@ -42,7 +42,6 @@ function M.new()
     indexes = nil,
     errors = {},
     project_file = nil,
-    references_dirty = true,
     setup_epoch = 0,
   }
 end
@@ -70,13 +69,17 @@ function M.get_config(state)
   return vim.deepcopy(state.config)
 end
 
-function M.get_state(state)
-  return vim.deepcopy({
+---@param opts? VVI18nStateOpts
+function M.get_state(state, opts)
+  opts = opts or {}
+  local snapshot = {
     root = state.root,
-    indexes = state.indexes,
     errors = state.errors,
     project_file = state.project_file,
-  })
+  }
+  -- metadata 消费方不遍历索引图；必须在 deepcopy 前排除，而非复制后丢弃
+  if opts.indexes ~= false then snapshot.indexes = state.indexes end
+  return vim.deepcopy(snapshot)
 end
 
 return M

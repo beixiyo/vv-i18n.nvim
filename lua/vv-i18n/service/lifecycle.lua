@@ -72,8 +72,7 @@ local function enable_references(state, plugin)
 end
 
 function M.reload(state, plugin)
-  -- 先撤销旧 root 的引用快照，避免 A→B 重载窗口暴露旧索引
-  References.clear()
+  -- 引用快照由 Index.reload 统一清理 / 失效，再由活动消费者按需恢复
   local indexes = Index.reload(state, plugin)
   apply_display_hl(state)
   -- 预览缓存里是旧索引算出的 hit/missing，不重算就要靠 toggle 才能看到新译文
@@ -107,7 +106,6 @@ function M.setup(state, plugin, opts, deps)
 
   if not state.config.references.enable then
     require('vv-i18n.references.index').clear()
-    state.references_dirty = true
   end
   apply_display_hl(state)
 
@@ -127,22 +125,17 @@ function M.setup(state, plugin, opts, deps)
   vim.schedule(function()
     if state.setup_epoch ~= epoch then return end
 
-    local had_indexes = state.indexes ~= nil
     Index.ensure(state, plugin)
     if state.setup_epoch ~= epoch then return end
 
     apply_display_hl(state)
     if state.config.references.enable then
+      -- 引用扫描不在 setup 触发：由 display 计数 / 面板首次消费时 ensure 按需启动
       enable_references(state, plugin)
-      if had_indexes and state.references_dirty then
-        require('vv-i18n.references.index').refresh(plugin)
-        state.references_dirty = false
-      end
     else
       require('vv-i18n.references.display').disable()
       pcall(vim.api.nvim_del_augroup_by_name, 'VVI18nReferencesIndex')
       require('vv-i18n.references.index').clear()
-      state.references_dirty = true
     end
     if state.config.display.enable then pcall(plugin.enable) end
   end)

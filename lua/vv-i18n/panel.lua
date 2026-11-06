@@ -205,7 +205,7 @@ local function create_panel(plugin)
       end
       require('vv-utils.mouse').block_visual_drag(buf)
       if opts.on_attach then opts.on_attach(current, buf) end
-      vim.wo[current.win].winhighlight =
+      vim.wo[current.win][0].winhighlight =
         'Normal:NormalFloat,CursorLine:PmenuSel,EndOfBuffer:NonText'
       vim.wo[current.win].statusline = ' '
     end,

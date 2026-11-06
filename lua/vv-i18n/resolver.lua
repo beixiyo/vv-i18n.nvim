@@ -170,18 +170,32 @@ local function match_hook_decl(decl, name, content, hook_names)
       end
       if not matched then goto continue end
 
-      -- 取 hook 的首个字符串参数
-      local arg
-      local arg_reliable = true
-      local hargs = rhs:field('arguments')[1]
-      if hargs then
-        for c in hargs:iter_children() do
-          if c:type() == 'string' or c:type() == 'template_string' then
-            arg, arg_reliable = literal_text(c, content)
-            break
-          end
+      -- 只认首参数（数组则只认首元素），不能把后续字符串当作命名空间。
+      local function first_value(node)
+        for child in node:iter_children() do
+          local kind = child:type()
+          if kind == ',' then return nil, false end -- 数组空槽
+          if child:named() and kind ~= 'comment' then return child, true end
         end
+        return nil, true
       end
+
+      local hargs = rhs:field('arguments')[1]
+      local first, valid
+
+      if hargs then first, valid = first_value(hargs) else valid = true end
+      if first and first:type() == 'array' then
+        first, valid = first_value(first)
+        if not first then valid = false end
+      end
+
+      if not valid then return hook, nil, false end
+      if not first then return hook, nil, true end -- 无参
+      if first:type() ~= 'string' and first:type() ~= 'template_string' then
+        return hook, nil, false
+      end
+      local arg, arg_reliable = literal_text(first, content)
+
       return hook, arg, arg_reliable
     end
     ::continue::
@@ -293,7 +307,7 @@ local function resolve_call(call, str, content, cfg)
     }
   end
 
-  if not literal_reliable or not hook_arg_reliable then
+  if not literal_reliable then
     return {
       ok = false,
       reason = 'unreliable-key',
@@ -317,6 +331,14 @@ local function resolve_call(call, str, content, cfg)
           literal = literal, prefix = ns, absolute = true, range = range }
       end
     end
+  end
+
+  if not hook_arg_reliable then
+    return {
+      ok = false, reason = 'unreliable-key', unsafe_dynamic = true,
+      literal = ast.node_text(str, content), prefix = prefix, hook = hook,
+      hook_arg = hook_arg, range = range,
+    }
   end
 
   return {

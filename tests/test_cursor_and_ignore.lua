@@ -1,4 +1,4 @@
--- 真实场景在独立子进程中执行；收集阶段仅注册具名用例。
+-- 真实场景在独立子进程中执行；收集阶段仅注册具名用例
 local H = dofile(vim.env.VV_TEST_REPO .. '/tests/helpers.lua')
 local T, child = H.new_set({ icons = true, fixtures = true, setup = 'bootstrap.lua' })
 
@@ -76,6 +76,8 @@ T["定义光标解析与忽略规则贯穿索引、引用和命令"] = function(
       },
     })
     i18n.reload()
+    check('reload 不再触发全量引用扫描', not References.is_scanning())
+    References.ensure(i18n)
     check('引用扫描完成', vim.wait(3000, function() return not References.is_scanning() end))
     check('自定义 scanner 的候选文件已被真实扫描',
       References.snapshot().scan.source_fingerprints[custom_source_path] ~= nil)

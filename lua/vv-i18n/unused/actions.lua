@@ -42,13 +42,15 @@ function M.new(plugin)
   }
 
   function self:rebuild()
+    -- 查询可能暖起 locale 索引，必须先完成它再读取 root 和引用快照
+    local tree = self.plugin.tree()
     local snapshot = References.snapshot()
-    local plugin_state = self.plugin.get_state()
+    local plugin_state = self.plugin.get_state({ indexes = false })
     snapshot.scan.root = plugin_state.root
     snapshot.scan.locale_failures = plugin_state.errors or {}
     snapshot.scan.scanning = snapshot.scanning
     self.report = Model.analyze({
-      tree = self.plugin.tree(),
+      tree = tree,
       references = snapshot.by_key,
       dynamic_evidence = snapshot.dynamic_evidence,
       scan = snapshot.scan,

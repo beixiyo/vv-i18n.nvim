@@ -30,8 +30,8 @@ local state = {
   scan = new_scan('idle', 0),
 }
 
-local function emit()
-  for _, callback in ipairs(state.listeners) do pcall(callback) end
+local function emit(event)
+  for _, callback in ipairs(state.listeners) do pcall(callback, event) end
 end
 
 local function relative(path, root)
@@ -107,6 +107,7 @@ local function complete_scan(request, callback)
   sort_failures()
   sort_warnings()
   state.scanning = false
+  state.scan.parsed = vim.tbl_count(state.scan.source_fingerprints)
   state.scan.status = #state.scan.failures == 0 and 'complete' or 'failed'
   emit()
   return finish(request, callback)
@@ -149,9 +150,6 @@ local function index_file(path, root, request, registry)
     warning.scanner = scanner.id
     state.scan.warnings[#state.scan.warnings + 1] = warning
   end
-  state.scan.source_fingerprints[path] = vim.fn.sha256(content)
-  state.scan.parsed = state.scan.parsed + 1
-
   local refs, dynamic_refs = {}, {}
   -- ignore_key 与 scanner.collect 同级：抛错记为本文件的 failure（只记一次），该 key 按不忽略处理，不中断扫描
   local ignore_failed = false
@@ -212,6 +210,7 @@ local function index_file(path, root, request, registry)
 
   if not is_current(request) then return false end
   store.replace_file(path, refs, dynamic_refs)
+  state.scan.source_fingerprints[path] = vim.fn.sha256(content)
   return true
 end
 
@@ -221,7 +220,7 @@ function M.refresh(plugin, callback)
   local request = scan_scope:begin()
   state.generation = state.generation + 1
   local generation = state.generation
-  local root = plugin.get_state().root
+  local root = plugin.get_state({ indexes = false }).root
 
   if not request:is_current() then return end
 
@@ -285,31 +284,35 @@ function M.refresh(plugin, callback)
 
       local files = result.code == 0 and vim.split(result.stdout or '', '\n', { trimempty = true }) or {}
       state.scan.files = #files
-      local index = 1
 
-      local function batch()
-        if not request:is_current() then return end
-
-        local last = math.min(index + 19, #files)
-        for current = index, last do
-          if not index_file(
-            root .. '/' .. files[current]:gsub('^%./', ''),
-            root,
-            request,
-            registry
-          ) then return end
-        end
-        index = last + 1
-
-        if index <= #files then
-          vim.schedule(batch)
-          return
-        end
-
-        complete_scan(request, callback)
+      -- 逐文件 + 时间预算分片解析（vv-utils.async.batch）：单项 tree-sitter 解析可重达
+      local items = {}
+      for _, file in ipairs(files) do
+        items[#items + 1] = root .. '/' .. file:gsub('^%./', '')
       end
 
-      batch()
+      local batch = async.batch({
+        items = items,
+        worker = function(path)
+          index_file(path, root, request, registry)
+        end,
+        is_valid = function() return is_current(request) end,
+        on_done = function(batch_result)
+          if not request:is_current() then return end
+          if batch_result.aborted then
+            fail_scan(request, callback, { reason = 'reference-batch-aborted' })
+            return
+          end
+          -- worker 的意外异常不能被批处理器隔离成假成功；撤销该文件的残留证据
+          for _, failure in ipairs(batch_result.errors) do
+            store.remove_file(failure.item)
+            state.scan.source_fingerprints[failure.item] = nil
+            add_failure(request, { file = failure.item, reason = 'index-file-error', detail = failure.err })
+          end
+          complete_scan(request, callback)
+        end,
+      })
+      request:set_disposer(function() batch.cancel() end)
     end)
   end))
 
@@ -318,18 +321,34 @@ function M.refresh(plugin, callback)
   end)
 end
 
+---按需启动引用扫描：首次消费引用数据（display 计数 / 面板）时调用；
+---同 root 扫描中或快照未失效时为 no-op；空 root 不启动。locale 重建只使证据失效，消费方决定何时重扫
+---@param plugin table
+---@return boolean started 本次调用是否启动了新扫描
+function M.ensure(plugin)
+  local root = plugin.get_state({ indexes = false }).root
+  if not root then return false end
+  if state.scan.root == root and (state.scanning or state.scan.status ~= 'idle') then return false end
+  M.refresh(plugin)
+  return true
+end
+
 ---@param plugin table
 ---@param path string
 function M.update_file(plugin, path)
-  local root = plugin.get_state().root
+  local root = plugin.get_state({ indexes = false }).root
   if not root then
     M.refresh(plugin)
     return
   end
   if not vim.startswith(path, root .. '/') then return end
 
+  -- 懒加载：从未扫描过就没有存量证据可维护，不为单文件保存触发全量扫描
+  if state.scan.status == 'idle' then return end
+
   -- 全量扫描进行中，或当前快照属于其他根目录时，局部更新不能发布完整快照
-  if state.scanning or state.scan.status ~= 'complete' or state.scan.root ~= root then
+  -- 部分文件失败（failed）仍有可用快照，走局部更新，避免一次保存就重扫全仓
+  if state.scanning or state.scan.root ~= root then
     M.refresh(plugin)
     return
   end
@@ -340,7 +359,10 @@ function M.update_file(plugin, path)
   if not request:is_current() then return end
 
   state.scan.generation = generation
-  state.scan.failures = {}
+  -- 只替换当前文件的失败；其他文件及 rg 等全局失败必须保留
+  for index = #state.scan.failures, 1, -1 do
+    if state.scan.failures[index].file == path then table.remove(state.scan.failures, index) end
+  end
   for index = #state.scan.warnings, 1, -1 do
     if state.scan.warnings[index].file == path then table.remove(state.scan.warnings, index) end
   end
@@ -374,7 +396,7 @@ function M.snapshot()
   })
 end
 
----@param callback fun()
+---@param callback fun(event?: 'invalidated') 依赖失效时通知活动消费者按需重扫
 ---@return fun()
 function M.subscribe(callback)
   state.listeners[#state.listeners + 1] = callback
@@ -389,13 +411,23 @@ function M.is_scanning()
   return state.scanning
 end
 
-function M.clear()
+local function reset(event)
   scan_scope:cancel()
   state.generation = state.generation + 1
   state.scanning = false
   store.clear()
   state.scan = new_scan('idle', state.generation)
-  emit()
+  emit(event)
+end
+
+---清除快照并取消在途扫描
+function M.clear()
+  reset()
+end
+
+---撤销依赖旧 locale / 配置的证据，仅通知活动消费者，不主动启动扫描
+function M.invalidate()
+  reset('invalidated')
 end
 
 return M

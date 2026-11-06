@@ -66,6 +66,12 @@ function M.toggle() return require('vv-i18n.display').toggle(M, state.config) en
 
 function M.get_config() return Runtime.get_config(state) end
 
-function M.get_state() return Runtime.get_state(state) end
+---@class VVI18nStateOpts
+---@field indexes? boolean 包含 locale 索引；false 在深拷贝前排除 indexes @default true
+
+---返回隔离的状态快照；indexes 默认 true，false 时仅省略 indexes，其余字段仍深拷贝
+---@param opts? VVI18nStateOpts
+---@return { root?: string, indexes?: table[], errors: table[], project_file?: string }
+function M.get_state(opts) return Runtime.get_state(state, opts) end
 
 return M

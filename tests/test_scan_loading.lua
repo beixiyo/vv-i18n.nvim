@@ -1,4 +1,4 @@
--- 真实场景在独立子进程中执行；收集阶段仅注册具名用例。
+-- 真实场景在独立子进程中执行；收集阶段仅注册具名用例
 local H = dofile(vim.env.VV_TEST_REPO .. '/tests/helpers.lua')
 local T, child = H.new_set({ icons = true, fixtures = true, setup = 'bootstrap.lua' })
 
@@ -49,6 +49,8 @@ T["引用扫描期间面板显示加载帧且终结释放时钟"] = function()
     config.references = { enable = true }
     i18n.setup(config)
     i18n.reload()
+    check('reload 不再触发全量引用扫描', not References.is_scanning())
+    References.ensure(i18n)
     check('初始扫描完成', wait_scan())
 
     -- 引用侧栏：扫描中打开
@@ -81,8 +83,8 @@ T["引用扫描期间面板显示加载帧且终结释放时钟"] = function()
     check('扫描在途时关闭侧栏不残留 timer', Clock._timer_count() == 0, Clock._timer_count())
     wait_scan()
 
-    -- 无用 key 面板：扫描中打开（迁移前调用已删除的 Loading.start 会抛错）
-    References.refresh(i18n)
+    -- 冷启动不能漏掉 ensure 在订阅建立前发出的扫描开始事件
+    References.clear()
     local opened, err = pcall(UnusedPanel.open, i18n)
     check('扫描中打开无用 key 面板不报错', opened, err)
     buf = vim.api.nvim_get_current_buf()
@@ -90,6 +92,9 @@ T["引用扫描期间面板显示加载帧且终结释放时钟"] = function()
     check('无用 key 面板 loading 帧在第 1 行 eol',
       #marks == 1 and marks[1].row == 1 and marks[1].pos == 'eol', vim.inspect(marks))
     check('扫描完成', wait_scan())
+    i18n.reload()
+    check('活动无用 key 面板在 reload 后按需重扫', References.is_scanning())
+    check('重扫完成', wait_scan())
     vim.wait(50)
     check('无用 key 面板扫描结束后帧消失', #loading_marks(buf) == 0, vim.inspect(loading_marks(buf)))
     check('无用 key 面板扫描结束后共享时钟释放', Clock._timer_count() == 0, Clock._timer_count())

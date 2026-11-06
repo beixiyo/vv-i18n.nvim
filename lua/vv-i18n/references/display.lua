@@ -27,8 +27,14 @@ local function render_buffer(bufnr)
   local path = vim.api.nvim_buf_get_name(bufnr)
   if path == '' then return end
 
+  local definitions = plugin.definitions_for_file(path)
+  -- 懒加载：首次需要引用计数时才启动全仓扫描（ensure 幂等，扫描中/快照有效时 no-op）
+  if #definitions > 0 then
+    require('vv-i18n.references.index').ensure(plugin)
+  end
+
   local seen = {}
-  for _, definition in ipairs(plugin.definitions_for_file(path)) do
+  for _, definition in ipairs(definitions) do
     local id = definition.full_key .. ':' .. definition.entry.row
 
     if not seen[id] then

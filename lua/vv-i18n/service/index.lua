@@ -58,22 +58,29 @@ end
 ---@param dir_lists string[][]  每个 source 的 locale 目录
 ---@return string
 local function fingerprint(dir_lists)
-  local parts = {}
+  local parts, by_dir = {}, {}
   for _, dirs in ipairs(dir_lists) do
     for _, dir in ipairs(dirs) do
-      parts[#parts + 1] = 'D' .. dir
-      for _, f in ipairs(Index.walk_files(dir)) do
-        local st = vim.uv.fs_stat(f.path)
-        if st then
-          parts[#parts + 1] = ('%s\0%d.%d\0%d'):format(f.path, st.mtime.sec, st.mtime.nsec, st.size)
+      -- 多 source 可共用目录；只在本次同步指纹读取内复用，不跨事件缓存磁盘状态
+      if not by_dir[dir] then
+        local files = { 'D' .. dir }
+        for _, f in ipairs(Index.walk_files(dir)) do
+          local st = vim.uv.fs_stat(f.path)
+          if st then
+            files[#files + 1] = ('%s\0%d.%d\0%d'):format(f.path, st.mtime.sec, st.mtime.nsec, st.size)
+          end
         end
+        by_dir[dir] = table.concat(files, '\n')
       end
+      parts[#parts + 1] = by_dir[dir]
     end
   end
   return table.concat(parts, '\n')
 end
 
 function M.reload(state, plugin)
+  local previous_root = state.root
+  local had_indexes = state.indexes ~= nil
   local project, project_dir = Project.load(state.base_config)
 
   state.config = project and Config.activate(project) or Config.activate(state.base_config)
@@ -117,12 +124,13 @@ function M.reload(state, plugin)
     vim.list_extend(state.errors, errors)
   end
 
-  if state.config.references.enable then
-    require('vv-i18n.references.index').refresh(plugin)
-    state.references_dirty = false
-  else
-    require('vv-i18n.references.index').clear()
-    state.references_dirty = true
+  -- 引用分类依赖 locale key 集合，重建后必须失效，但不能无条件全扫
+  -- 活动消费者收到通知后按需恢复；首次暖索引不撤销正在建立的引用扫描
+  local references = require('vv-i18n.references.index')
+  if not state.config.references.enable then
+    references.clear()
+  elseif had_indexes or (previous_root ~= nil and previous_root ~= state.root) then
+    references.invalidate()
   end
   return state.indexes
 end

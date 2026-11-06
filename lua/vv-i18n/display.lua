@@ -14,8 +14,9 @@ local M = {}
 local ns = vim.api.nvim_create_namespace('vv_i18n_preview')
 local enabled = false
 local augroup = nil
-local cache = {}      -- bufnr -> { items }
-local touched = {}    -- winid -> { cl, cc }  （conceal 选项原值，还原用）
+local cache = {}      -- bufnr -> { items, rows, hidden, tick }
+local touched = {}    -- winid -> { buf, original, applied }，仅记该窗最近接管的 buffer
+local conceal_options = { conceallevel = 2, concealcursor = 'nvic' }
 local active = nil    -- { plugin, config }：enable 时记下，reload 后由 refresh 换成新 config
 
 --- 组装一项的 virt_text chunks（支持 display.render 函数自定义）
@@ -73,7 +74,7 @@ end
 --- 把一项画成：conceal 隐藏原字面量 + inline 插入译文（自然长度）
 local function draw_item(bufnr, it)
   local rg = it.range
-  pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, rg.srow, rg.scol, {
+  local ok, id = pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, rg.srow, rg.scol, {
     end_row = rg.erow,
     end_col = rg.ecol,
     conceal = '',                 -- 抹掉原 key 宽度（配合 conceallevel=2）
@@ -81,15 +82,15 @@ local function draw_item(bufnr, it)
     virt_text_pos = 'inline',     -- 译文按自然长度插入 → 动态长度、无空白
     hl_mode = 'combine',
   })
+  it.mark = ok and id or nil
 end
 
---- 从缓存重绘：跳过光标正落在其字面量范围内的项（token 级还原），不重新 parse
+--- 只更新光标移入 / 移出的项；未受影响的 extmark 保持不动，不重新 parse
 local function redraw(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then return end
-  vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-  if not enabled then return end
+  if not enabled or not vim.api.nvim_buf_is_valid(bufnr) then return end
   local st = cache[bufnr]
-  if not st then return end
+  -- 编辑后的旧 range 不再可信，交给内容事件重算，不能用旧坐标恢复 mark
+  if not st or st.tick ~= vim.api.nvim_buf_get_changedtick(bufnr) then return end
 
   local cur_row, cur_col = -1, -1
   if vim.api.nvim_get_current_buf() == bufnr then
@@ -97,20 +98,46 @@ local function redraw(bufnr)
     cur_row, cur_col = pos[1] - 1, pos[2]
   end
 
-  for _, it in ipairs(st.items) do
+  local hidden = {}
+
+  for _, it in ipairs(st.rows[cur_row] or {}) do
     local rg = it.range
-    local on_it = cur_row == rg.srow and cur_col >= rg.scol and cur_col < rg.ecol
-    if not on_it then draw_item(bufnr, it) end
+    if cur_col >= rg.scol and cur_col < rg.ecol then hidden[it] = true end
   end
+
+  for it in pairs(st.hidden) do
+    if not hidden[it] then draw_item(bufnr, it) end
+  end
+
+  for it in pairs(hidden) do
+    if it.mark then
+      pcall(vim.api.nvim_buf_del_extmark, bufnr, ns, it.mark)
+      it.mark = nil
+    end
+  end
+  st.hidden = hidden
 end
 
 --- 重新计算（parse）+ 缓存 + 绘制
 local function recompute(plugin, config, bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then return end
-  cache[bufnr] = {
+  local st = {
     items = M.compute(plugin, config, bufnr),
+    rows = {},
+    hidden = {},
     tick = vim.api.nvim_buf_get_changedtick(bufnr),
   }
+
+  cache[bufnr] = st
+  vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  if not enabled then return end
+
+  for _, it in ipairs(st.items) do
+    local row = it.range.srow
+    st.rows[row] = st.rows[row] or {}
+    st.rows[row][#st.rows[row] + 1] = it
+    draw_item(bufnr, it)
+  end
   redraw(bufnr)
 end
 
@@ -139,26 +166,34 @@ local function ft_match(bufnr, ft_list)
   return false
 end
 
---- 给窗口装上 conceal（首次保存原值），译文才能隐藏原 key
---- 只写窗口局部值：vim.wo[win].x = v 等同 :set，会连全局值一起改，之后新建的窗口
---- （vv-git diff 等）都会继承 conceallevel=2，markdown 的 conceal_lines 在 wrap 窗口里
---- 逐行触发 treesitter 解析，大文件打开即卡数秒
---- 局部值跟随「窗口 + buffer」：同窗口 :e 新 buffer 会回落到窗口的全局副本，
---- 所以原值只存一次，但每次进入匹配 buffer 都要重新设置
+--- 只写 raw local，不修改窗口 global 副本；同一 buffer 进入时仍重新接管。
+--- 换 buffer 时记录新基线，不把前一个 buffer 的原值写入当前 buffer。
+--- 不改写隐藏 buffer 的窗口历史，也不追踪 split 复制值的来源。
 local function set_conceal(win)
-  if not touched[win] then
-    touched[win] = { cl = vim.wo[win].conceallevel, cc = vim.wo[win].concealcursor }
+  local buf = vim.api.nvim_win_get_buf(win)
+  local saved = touched[win]
+  if not saved or saved.buf ~= buf then
+    saved = { buf = buf, original = {}, applied = {} }
+    for name in pairs(conceal_options) do
+      saved.original[name] = vim.api.nvim_get_option_value(name, { win = win, scope = 'local' })
+    end
+    touched[win] = saved
   end
-  vim.api.nvim_set_option_value('conceallevel', 2, { win = win, scope = 'local' })
-  -- 始终 conceal，还原全靠 token 级删 extmark
-  vim.api.nvim_set_option_value('concealcursor', 'nvic', { win = win, scope = 'local' })
+  for name, value in pairs(conceal_options) do
+    vim.api.nvim_set_option_value(name, value, { win = win, scope = 'local' })
+    saved.applied[name] = value
+  end
 end
 
 local function restore_conceal()
   for win, saved in pairs(touched) do
-    if vim.api.nvim_win_is_valid(win) then
-      pcall(vim.api.nvim_set_option_value, 'conceallevel', saved.cl, { win = win, scope = 'local' })
-      pcall(vim.api.nvim_set_option_value, 'concealcursor', saved.cc, { win = win, scope = 'local' })
+    if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == saved.buf then
+      for name, value in pairs(saved.applied) do
+        -- 每个字段独立保护后来 owner；数值相同的再次写入无法区分来源。
+        if vim.api.nvim_get_option_value(name, { win = win, scope = 'local' }) == value then
+          pcall(vim.api.nvim_set_option_value, name, saved.original[name], { win = win, scope = 'local' })
+        end
+      end
     end
   end
   touched = {}
@@ -166,11 +201,15 @@ end
 
 --- 重算所有窗口里已加载的匹配 buffer
 local function recompute_visible(plugin, config)
+  local seen = {}
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local b = vim.api.nvim_win_get_buf(win)
     if vim.api.nvim_buf_is_loaded(b) and ft_match(b, config.ft) then
       set_conceal(win)
-      recompute(plugin, config, b)
+      if not seen[b] then
+        seen[b] = true
+        recompute(plugin, config, b)
+      end
     end
   end
 end

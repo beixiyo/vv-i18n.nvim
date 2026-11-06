@@ -101,6 +101,8 @@ end
 ---@param plugin table
 ---@param full_key string
 function M.toggle(plugin, full_key)
+  -- 懒加载：面板首次需要引用数据时才启动全仓扫描（ensure 幂等）
+  References.ensure(plugin)
   if active_panel and active_panel:is_open() then
     if active_key == full_key then
       active_panel:close()
@@ -243,8 +245,9 @@ function M.toggle(plugin, full_key)
   })
   local ok, err = xpcall(function()
     panel:open()
-    unsubscribe = References.subscribe(function()
+    unsubscribe = References.subscribe(function(event)
       if panel:is_open() then
+        if event == 'invalidated' then References.ensure(plugin) end
         panel:refresh()
         sync_loading()
       end

@@ -66,6 +66,7 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     }
     i18n.setup(transition_config)
     i18n.reload()
+    References.ensure(i18n)
     check('references transition fixture 初始扫描完成',
       vim.wait(3000, function() return not References.is_scanning() end))
     check('references=true 建立真实引用索引',
@@ -86,7 +87,8 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     }, transition_source)
 
     i18n.setup(transition_config)
-    check('references false→true 会重新扫描禁用期变化', vim.wait(3000, function()
+    References.ensure(i18n)
+    check('重开 references 后按需扫描补上禁用期变化', vim.wait(3000, function()
       return not References.is_scanning() and #References.get('greeting.hello') == 2
     end), #References.get('greeting.hello'))
     local next_root_config = H.ns_config()
@@ -96,6 +98,7 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
 
     i18n.setup(config, deps)
     i18n.reload()
+    References.ensure(i18n)
 
     check('命令 VVI18nReferences 注册', vim.fn.exists(':VVI18nReferences') == 2)
     check('引用扫描完成', vim.wait(3000, function() return not References.is_scanning() end))
@@ -301,6 +304,7 @@ T["真实引用扫描、增量刷新、侧栏跳转与宽度持久化"] = functi
     direct_config.references.show_zero = true
     i18n.setup(direct_config, deps)
     i18n.reload()
+    References.ensure(i18n)
     check('重配后引用扫描完成', vim.wait(3000, function() return not References.is_scanning() end))
 
     vim.api.nvim_set_current_buf(locale_buf)

@@ -1,4 +1,4 @@
--- 真实场景在独立子进程中执行；收集阶段仅注册具名用例。
+-- 真实场景在独立子进程中执行；收集阶段仅注册具名用例
 local H = dofile(vim.env.VV_TEST_REPO .. '/tests/helpers.lua')
 local T, child = H.new_set({ icons = true, fixtures = true, setup = 'bootstrap.lua' })
 
@@ -103,8 +103,11 @@ T["项目根探测、配置归一化与重配置生命周期"] = function()
     check('命令 VVI18nEdit 注册', vim.fn.exists(':VVI18nEdit') == 2)
 
     i18n.reload()
-    vim.wait(1000, function() return not require('vv-i18n.references.index').is_scanning() end, 10)
-    local unused_scan = require('vv-i18n.references.index').snapshot()
+    local References = require('vv-i18n.references.index')
+    check('reload 不再触发全量引用扫描', not References.is_scanning())
+    References.ensure(i18n)
+    vim.wait(3000, function() return not References.is_scanning() end, 10)
+    local unused_scan = References.snapshot()
     check('unused 删除门禁获得完整扫描快照', unused_scan.scan.status == 'complete'
       and unused_scan.scan.generation == unused_scan.generation)
     vim.cmd('VVI18nUnused')

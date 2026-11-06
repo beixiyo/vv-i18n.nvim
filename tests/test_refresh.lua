@@ -1,4 +1,4 @@
--- 真实场景在独立子进程中执行；收集阶段仅注册具名用例。
+-- 真实场景在独立子进程中执行；收集阶段仅注册具名用例
 local H = dofile(vim.env.VV_TEST_REPO .. '/tests/helpers.lua')
 local T, child = H.new_set({ icons = true, fixtures = true, setup = 'bootstrap.lua' })
 
@@ -9,6 +9,7 @@ T["外部修改与手动重建及时更新预览和定义缓存"] = function()
 
     local H = dofile(vim.env.VV_TEST_REPO .. '/tests/helper.lua')
     local i18n = require('vv-i18n')
+    local References = require('vv-i18n.references.index')
 
     local check = H.checker()
 
@@ -57,6 +58,11 @@ T["外部修改与手动重建及时更新预览和定义缓存"] = function()
     check('初始：已有 key 显示译文', (preview_at(2) or ''):find('Hello', 1, true) ~= nil, preview_at(2))
     check('初始：未定义 key 显示缺失', (preview_at(3) or ''):find('greeting.bye', 1, true) ~= nil, preview_at(3))
 
+    local scan_starts = 0
+    local unsubscribe = References.subscribe(function()
+      if References.is_scanning() then scan_starts = scan_starts + 1 end
+    end)
+
     -- 外部补上 key（不经 nvim 写盘），切回 nvim
     write_locale({ hello = 'Hello', bye = 'Bye' })
     vim.api.nvim_exec_autocmds('FocusGained', {})
@@ -64,12 +70,17 @@ T["外部修改与手动重建及时更新预览和定义缓存"] = function()
     check('外部新增 key 后 FocusGained 自动重建并显示译文',
       (preview_at(3) or ''):find('Bye', 1, true) ~= nil and not (preview_at(3) or ''):find('greeting.bye', 1, true),
       preview_at(3))
+    -- 核心回归：locale 重建只重建 locale 索引，不得触发全仓引用扫描
+    -- （否则每次外部改 locale 后的普通事件都会把大仓库重扫一遍，交互连片卡顿）
+    check('没有引用消费者时 locale 重建不曾启动全仓扫描', scan_starts == 0, scan_starts)
 
     -- 不触发任何事件，直接手动 reload：预览必须立即反映新索引
     write_locale({ hello = 'Hello', bye = 'Goodbye' })
     i18n.reload()
     check('手动 reload 后预览立即重算（无需 toggle）',
       (preview_at(3) or ''):find('Goodbye', 1, true) ~= nil, preview_at(3))
+    check('没有引用消费者时手动 reload 同样不曾启动扫描', scan_starts == 0, scan_starts)
+    unsubscribe()
 
     -- locale 未变时事件不触发重建
     vim.api.nvim_exec_autocmds('FocusGained', {})

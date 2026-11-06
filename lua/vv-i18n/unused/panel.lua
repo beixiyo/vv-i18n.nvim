@@ -1,7 +1,7 @@
 -- 潜在无用 key 面板
 --
 -- 只把“静态引用扫描未命中”展示为候选。复制负责交付核查证据，删除负责
--- 生成不可变计划并经多文件事务落盘；扫描不完整时拒绝删除。
+-- 生成不可变计划并经多文件事务落盘；扫描不完整时拒绝删除
 
 local State = require('vv-utils.state')
 local TreePanel = require('vv-utils.tree_panel')
@@ -140,8 +140,9 @@ local function create_panel(plugin, actions)
     }, opts.render or {}),
   })
   panel:open()
-  unsubscribe = References.subscribe(function()
+  unsubscribe = References.subscribe(function(event)
     if panel:is_open() then
+      if event == 'invalidated' then References.ensure(plugin) end
       actions:rebuild()
       panel:refresh()
       sync_loading()
@@ -159,6 +160,10 @@ function M.open(plugin)
     return
   end
   active_actions = Actions.new(plugin)
+  active_actions:rebuild()
+  -- 懒加载：首次需要引用数据时才启动全仓扫描（ensure 幂等）
+  -- 第一次 rebuild 暖 locale 索引；ensure 后重新取扫描状态，避免错过订阅前的开始事件
+  References.ensure(plugin)
   active_actions:rebuild()
   active_panel = create_panel(plugin, active_actions)
 end

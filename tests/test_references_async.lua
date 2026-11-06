@@ -1,4 +1,4 @@
--- 真实场景在独立子进程中执行；收集阶段仅注册具名用例。
+-- 真实场景在独立子进程中执行；收集阶段仅注册具名用例
 local H = dofile(vim.env.VV_TEST_REPO .. '/tests/helpers.lua')
 local T, child = H.new_set({ icons = true, fixtures = true, setup = 'bootstrap.lua' })
 
@@ -31,6 +31,24 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
       function process:kill() self.killed = true end
       systems[#systems + 1] = process
       return process
+    end
+
+    -- 批处理按时间预算分片续跑（uv timer → vim.schedule）：按序跑完队列里未执行的
+    -- 回调并短暂泵事件循环直到队列稳定；不等待在途 rg（由用例自行触发）
+    -- 队列是只追加日志，游标保证每个回调恰好执行一次；用例重置队列时游标归零
+    local fired = 0
+    local function drain_slices()
+      for _ = 1, 200 do
+        if #scheduled == fired then
+          vim.wait(10)
+          if #scheduled == fired then return end
+        end
+        while #scheduled > fired do
+          fired = fired + 1
+          scheduled[fired]()
+        end
+      end
+      error('分片回调未在时限内稳定')
     end
 
     package.loaded['vv-i18n.references.index'] = nil
@@ -67,8 +85,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
 
     systems[2].callback({ code = 0, stdout = 'b.ts\n' })
     systems[1].callback({ code = 0, stdout = 'a.ts\n' })
-    scheduled[1]()
-    scheduled[2]()
+    drain_slices()
     check('B 先返回后只保留 B 的引用', b_done and not a_done
       and #References.get('new.key') == 1 and #References.get('old.key') == 0)
 
@@ -76,7 +93,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     References.refresh(plugin(root_a, 'old.key'), function() clear_done = true end)
     systems[3].callback({ code = 0, stdout = 'a.ts\n' })
     References.clear()
-    scheduled[3]()
+    drain_slices()
     check('clear 后已排队 callback 不得复活索引', systems[3].killed == true
       and not clear_done and #References.get('old.key') == 0 and not References.is_scanning())
 
@@ -90,7 +107,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     end)
     References.refresh(plugin(root_b, 'new.key'), function() reentrant_done = true end)
     systems[4].callback({ code = 0, stdout = 'b.ts\n' })
-    scheduled[4]()
+    drain_slices()
     check('完成事件中 clear 会废弃同一批旧 completion callback',
       cleared_from_listener and not reentrant_done and #References.get('new.key') == 0)
     unsubscribe()
@@ -98,6 +115,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     References.clear()
     systems = {}
     scheduled = {}
+    fired = 0
     local initial_a_done = false
     local initial_b_done = false
     local initial_reentered = false
@@ -111,7 +129,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     check('初始 emit 同步触发 B 后 A 不再启动 rg', initial_reentered
       and #systems == 1 and systems[1].options.cwd == root_b and not initial_a_done)
     systems[1].callback({ code = 0, stdout = 'b.ts\n' })
-    scheduled[1]()
+    drain_slices()
     check('初始 emit 重入后 B 独占 scanning 与 completion', initial_b_done
       and not initial_a_done and #References.get('new.key') == 1)
     initial_unsubscribe()
@@ -119,6 +137,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     References.clear()
     systems = {}
     scheduled = {}
+    fired = 0
     local fast_a_done = false
     local fast_b_done = false
     local fast_a = plugin(root_a, 'old.key')
@@ -131,13 +150,14 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
       References.is_scanning() and #systems == 1 and systems[1].options.cwd == root_b
         and not fast_a_done)
     systems[1].callback({ code = 0, stdout = 'b.ts\n' })
-    scheduled[1]()
+    drain_slices()
     check('empty fast path 重入只投递 B completion', fast_b_done and not fast_a_done
       and #References.get('new.key') == 1 and #References.get('old.key') == 0)
 
     References.clear()
     systems = {}
     scheduled = {}
+    fired = 0
     local collect_a_done = false
     local collect_b_done = false
     local collect_reentered = false
@@ -158,24 +178,25 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     end
     References.refresh(collect_a, function() collect_a_done = true end)
     systems[1].callback({ code = 0, stdout = 'a.ts\n' })
-    scheduled[1]()
+    drain_slices()
     check('collect_content 重入 B 后 A 不提交局部索引', collect_reentered
       and #systems == 2 and #References.get('old.key') == 0 and not collect_a_done)
     systems[2].callback({ code = 0, stdout = 'b.ts\n' })
-    scheduled[2]()
+    drain_slices()
     check('collect_content 重入最终只保留 B', collect_b_done and not collect_a_done
       and #References.get('new.key') == 1 and #References.get('old.key') == 0)
 
     References.clear()
     systems = {}
     scheduled = {}
+    fired = 0
     local update_done = false
     References.refresh(plugin(root_a, 'old.key'), function() update_done = true end)
     References.update_file(plugin(root_b, 'new.key'), root_b .. '/b.ts')
     check('全量扫描期间单文件更新升级为新的全量扫描', systems[1].killed == true
       and #systems == 2 and systems[2].options.cwd == root_b)
     systems[2].callback({ code = 0, stdout = 'b.ts\n' })
-    scheduled[1]()
+    drain_slices()
     check('升级后的快照不混入旧 root 或旧 completion', update_done == false
       and #References.get('new.key') == 1 and #References.get('old.key') == 0
       and References.snapshot().scan.status == 'complete')
@@ -205,6 +226,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     References.clear()
     systems = {}
     scheduled = {}
+    fired = 0
     vim.fn.writefile({ "t('new.key')" }, root_b .. '/a.ts')
     local dynamic_plugin = plugin(root_b, 'new.key')
     dynamic_plugin.collect_content = function(_, path)
@@ -220,7 +242,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     end
     References.refresh(dynamic_plugin, function() end)
     systems[1].callback({ code = 0, stdout = 'b.ts\na.ts\n' })
-    scheduled[1]()
+    drain_slices()
     local dynamic_snapshot = References.snapshot()
     local dynamic_evidence = dynamic_snapshot.dynamic_evidence['items.*'] or {}
     check('动态证据按位置稳定排序且同调用去重', #dynamic_evidence == 2
@@ -230,6 +252,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     References.clear()
     systems = {}
     scheduled = {}
+    fired = 0
     local python_path = root_b .. '/messages.py'
     vim.fn.writefile({ "gettext('python.title')" }, python_path)
     local custom_called = false
@@ -257,7 +280,7 @@ T["引用扫描取消、重入、过期回调与扩展扫描器"] = function()
     References.refresh(python_plugin)
     local python_command = table.concat(systems[1].command, ' ')
     systems[1].callback({ code = 0, stdout = 'messages.py\n' })
-    scheduled[1]()
+    drain_slices()
     local python_snapshot = References.snapshot()
     check('外部 scanner 扩展候选文件并按扩展名路由 collect', custom_called
       and python_command:find('*.py', 1, true) ~= nil
